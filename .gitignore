@@ -1,0 +1,4 @@
+# fastapi gitignore file
+.env
+__pycache__/
+venv/
