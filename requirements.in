@@ -1,0 +1,22 @@
+# Framework
+fastapi
+uvicorn[standard]
+
+# Database
+sqlalchemy
+psycopg2-binary
+redis
+
+# Settings Management
+pydantic-settings
+python-dotenv
+
+# Data & Technical Analysis
+pandas
+pandas-ta
+
+# Binance WebSocket
+unicorn-binance-websocket-api
+
+# For compiling requirements.txt
+pip-tools
