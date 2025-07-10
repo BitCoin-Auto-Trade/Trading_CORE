@@ -18,6 +18,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-from app.api import signal, order
+from app.api import signal, order, dataview
 app.include_router(signal.router, prefix="/signals", tags=["signals"])
 app.include_router(order.router, prefix="/orders", tags=["orders"])
+app.include_router(dataview.router, prefix="/dataview", tags=["dataview"])
