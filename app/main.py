@@ -1,14 +1,8 @@
 from contextlib import asynccontextmanager
-import json
-from fastapi import FastAPI, Depends
-from sqlalchemy.orm import Session
+from fastapi import FastAPI
 
-from app.core.db import engine, redis_client, get_db, get_redis
-from app.models import Base
-# 생성한 모델들을 import 합니다.
-from app.models.kline import Kline_1m
-from app.models.funding_rate import FundingRate
-from app.models.open_interest import OpenInterest
+from app.core.db import redis_client
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

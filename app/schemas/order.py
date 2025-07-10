@@ -21,7 +21,7 @@ class Kline1mData(BaseModel):
     B: str = Field(..., description="Ignore")
 
 class OrderBookDepth(BaseModel):
-    lastUpdateId: int
+    lastUpdateId: int | None = None
     bids: List[List[str]]
     asks: List[List[str]]
     ts: int | None = None # 추가된 필드
@@ -37,4 +37,4 @@ class TradeData(BaseModel):
     l: int = Field(..., description="Last tradeId")
     T: int = Field(..., description="Trade time")
     m: bool = Field(..., description="Is the buyer the market maker?")
-    M: bool = Field(..., description="Ignore")
+    M: bool | None = Field(None, description="Ignore")
