@@ -12,6 +12,7 @@ redis_client = redis.Redis(
     host=settings.REDIS_HOST,
     port=settings.REDIS_PORT,
     db=settings.REDIS_DB,
+    password=settings.REDIS_PASSWORD,
     decode_responses=True  # 응답을 UTF-8로 디코딩하여 문자열로 받습니다.
 )
 

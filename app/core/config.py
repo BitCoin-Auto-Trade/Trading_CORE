@@ -9,20 +9,21 @@ class Settings(BaseSettings):
     # PostgreSQL
     POSTGRES_USER: str
     POSTGRES_PASSWORD: str
-    POSTGRES_SERVER: str
+    POSTGRES_HOST: str
     POSTGRES_PORT: str
     POSTGRES_DB: str
     
-    DATABASE_URL: str = f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_SERVER')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
+    DATABASE_URL: str = f"postgresql+psycopg2://{os.getenv('POSTGRES_USER')}:{os.getenv('POSTGRES_PASSWORD')}@{os.getenv('POSTGRES_HOST')}:{os.getenv('POSTGRES_PORT')}/{os.getenv('POSTGRES_DB')}"
 
     # Redis
-    REDIS_HOST: str = "localhost"
-    REDIS_PORT: int = 6379
-    REDIS_DB: int = 0
+    REDIS_HOST: str
+    REDIS_PORT: int
+    REDIS_DB: int
+    REDIS_PASSWORD: str
 
     # Binance API
-    BINANCE_API_KEY: str | None = None
-    BINANCE_API_SECRET: str | None = None
+    BINANCE_API_KEY: str
+    BINANCE_API_SECRET: str
 
     class Config:
         env_file = ".env"
