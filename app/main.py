@@ -27,7 +27,3 @@ app = FastAPI(lifespan=lifespan)
 from app.api import signal, order
 app.include_router(signal.router, prefix="/signals", tags=["signals"])
 app.include_router(order.router, prefix="/orders", tags=["orders"])
-
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to the Trading Core API"}
