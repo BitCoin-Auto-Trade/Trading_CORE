@@ -1,15 +1,13 @@
-import redis
-from app.repository.order import OrderRepository
+"""
+주문 관련 비즈니스 로직을 처리하는 서비스 모듈입니다.
+"""
+from app.services.realtime_data_service import RealtimeDataService
 
 class OrderService:
-    def __init__(self, redis_client: redis.Redis):
-        self.order_repo = OrderRepository(redis_client)
-
-    def get_kline_1m(self, symbol: str):
-        return self.order_repo.get_kline_1m_data(symbol)
-
-    def get_order_book(self, symbol: str):
-        return self.order_repo.get_order_book_depth(symbol)
-
-    def get_trades(self, symbol: str, limit: int = 100):
-        return self.order_repo.get_recent_trades(symbol, limit)
+    """
+    주문 관련 로직을 위한 서비스 클래스.
+    - `realtime_data_service`: RealtimeDataService 인스턴스
+    """
+    def __init__(self, realtime_data_service: RealtimeDataService):
+        self.realtime_data_service = realtime_data_service
+        # 주문 관련 로직 추가 예정
