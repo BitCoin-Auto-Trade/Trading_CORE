@@ -3,7 +3,7 @@
 """
 from sqlalchemy.orm import Session
 from app.repository.db_repository import DBRepository
-from app.schemas.getdata import KlineBase, FundingRateBase, OpenInterestBase
+from app.schemas.getdata_schema import KlineBase, FundingRateBase, OpenInterestBase
 
 class HistoricalDataService:
     """

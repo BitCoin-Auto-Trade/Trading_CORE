@@ -3,7 +3,7 @@
 """
 import redis
 from app.repository.redis_repository import RedisRepository
-from app.schemas.getdata import Kline1mData, OrderBookDepth, TradeData
+from app.schemas.getdata_schema import Kline1mData, OrderBookDepth, TradeData
 
 class RealtimeDataService:
     """

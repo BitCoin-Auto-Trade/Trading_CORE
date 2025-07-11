@@ -8,7 +8,7 @@ import redis
 from app.core.db import get_db, get_redis
 from app.services.realtime_data_service import RealtimeDataService
 from app.services.historical_data_service import HistoricalDataService
-from app.schemas.getdata import Kline1mData, OrderBookDepth, TradeData, KlineBase, FundingRateBase, OpenInterestBase
+from app.schemas.getdata_schema import Kline1mData, OrderBookDepth, TradeData, KlineBase, FundingRateBase, OpenInterestBase
 
 router = APIRouter()
 

@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends
 import redis
 
 from app.core.db import get_redis
-from app.services.order import OrderService
+from app.services.order_service import OrderService
 from app.services.realtime_data_service import RealtimeDataService
 
 router = APIRouter()

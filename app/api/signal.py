@@ -6,10 +6,10 @@ from sqlalchemy.orm import Session
 import redis
 
 from app.core.db import get_db, get_redis
-from app.services.signal import SignalService
+from app.services.signal_service import SignalService
 from app.services.historical_data_service import HistoricalDataService
 from app.services.realtime_data_service import RealtimeDataService
-from app.schemas.signal import TradingSignal
+from app.schemas.signal_schema import TradingSignal
 
 router = APIRouter()
 
@@ -31,26 +31,17 @@ def get_signal_service(
     return SignalService(historical_data_service=historical_data_service, realtime_data_service=realtime_data_service)
 
 
-@router.get("/rsi/{symbol}", response_model=TradingSignal, summary="RSI 기반 매매 신호 조회")
-def get_rsi_trading_signal(symbol: str, service: SignalService = Depends(get_signal_service)):
-    """
-    RSI 값을 기반으로 특정 심볼의 매매 신호를 조회합니다.
-    - **symbol**: `BTCUSDT`
-    """
-    return service.get_trading_signal_by_rsi(symbol.upper())
-
-@router.get("/macd/{symbol}", response_model=TradingSignal, summary="MACD 기반 매매 신호 조회")
-def get_macd_trading_signal(symbol: str, service: SignalService = Depends(get_signal_service)):
-    """
-    MACD 값을 기반으로 특정 심볼의 매매 신호를 조회합니다.
-    - **symbol**: `BTCUSDT`
-    """
-    return service.get_trading_signal_by_macd(symbol.upper())
-
-@router.get("/combined/{symbol}", response_model=TradingSignal, summary="RSI & MACD 종합 매매 신호 조회")
+@router.get("/combined/{symbol}", response_model=TradingSignal, summary="종합 매매 신호 조회")
 def get_combined_trading_signal(symbol: str, service: SignalService = Depends(get_signal_service)):
     """
-    RSI와 MACD를 결합한 종합 매매 신호를 조회합니다.
+    RSI, MACD, 오더북, 최근 체결 내역을 종합하여 전문적인 매매 신호를 생성합니다.
+
     - **symbol**: `BTCUSDT`
+    - **신호 종류**:
+        - `STRONG_BUY`: 강력 매수
+        - `BUY`: 매수
+        - `HOLD`: 관망
+        - `SELL`: 매도
+        - `STRONG_SELL`: 강력 매도
     """
     return service.get_combined_trading_signal(symbol.upper())

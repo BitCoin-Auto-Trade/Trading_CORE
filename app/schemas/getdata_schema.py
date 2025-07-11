@@ -55,7 +55,7 @@ class KlineBase(BaseModel):
     macd_hist: float | None = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class FundingRateBase(BaseModel):
     timestamp: datetime.datetime
@@ -63,7 +63,7 @@ class FundingRateBase(BaseModel):
     funding_rate: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
 
 class OpenInterestBase(BaseModel):
     timestamp: datetime.datetime
@@ -71,4 +71,4 @@ class OpenInterestBase(BaseModel):
     open_interest: float
 
     class Config:
-        orm_mode = True
+        from_attributes = True
