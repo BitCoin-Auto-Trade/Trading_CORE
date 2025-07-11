@@ -13,6 +13,7 @@ from app.services.signal_service import SignalService
 from app.services.historical_data_service import HistoricalDataService
 from app.services.realtime_data_service import RealtimeDataService
 from app.core.db import redis_client
+from app.core.config import settings
 
 # SQLAlchemy 세션을 스케줄링된 작업 내에서 생성하기 위한 세션 메이커
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -31,10 +32,11 @@ def get_signal_service() -> SignalService:
 
 async def analyze_and_store_signals():
     """
-    주요 심볼(BTCUSDT, ETHUSDT)의 매매 신호를 분석하고 결과를 Redis에 저장합니다.
+    설정에 정의된 심볼들의 매매 신호를 분석하고 결과를 Redis에 저장합니다.
     - 이 함수는 1분마다 주기적으로 실행됩니다.
     """
-    symbols = ["BTCUSDT", "ETHUSDT"] # 분석할 심볼 목록
+    # 설정에서 쉼표로 구분된 심볼 문자열을 리스트로 변환합니다.
+    symbols = [symbol.strip() for symbol in settings.TRADING_SYMBOLS.split(',')]
     signal_service = get_signal_service()
     
     print("\n[Scheduled Job] Analyzing trading signals...")

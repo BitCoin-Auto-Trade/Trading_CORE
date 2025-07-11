@@ -20,6 +20,7 @@ pandas-ta
 
 # Binance WebSocket
 unicorn-binance-websocket-api
+python-binance
 
 # For compiling requirements.txt
 pip-tools

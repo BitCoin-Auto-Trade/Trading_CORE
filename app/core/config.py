@@ -24,6 +24,11 @@ class Settings(BaseSettings):
     # Binance API
     BINANCE_API_KEY: str
     BINANCE_API_SECRET: str
+    BINANCE_TESTNET_API_KEY: str
+    BINANCE_TESTNET_API_SECRET: str
+
+    # Trading Symbols
+    TRADING_SYMBOLS: str = "BTCUSDT"
 
     class Config:
         env_file = ".env"
