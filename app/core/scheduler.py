@@ -51,10 +51,10 @@ async def analyze_and_store_signals():
             print(f"Error analyzing signal for {symbol}: {e}")
 
 def start_scheduler():
-    """ 스케줄러를 시작하고, 매매 신호 분석 작업을 1분 간격으로 등록합니다. """
-    scheduler.add_job(analyze_and_store_signals, 'interval', minutes=1, id="analyze_signals")
+    """ 스케줄러를 시작하고, 매 분 5초에 매매 신호 분석 작업을 실행하도록 등록합니다. """
+    scheduler.add_job(analyze_and_store_signals, 'cron', second=5, id="analyze_signals")
     scheduler.start()
-    print("Scheduler started. Signal analysis job is scheduled to run every minute.")
+    print("Scheduler started. Signal analysis job is scheduled to run at 5 seconds past every minute.")
 
 def stop_scheduler():
     """ 애플리케이션 종료 시 스케줄러를 안전하게 종료합니다. """
