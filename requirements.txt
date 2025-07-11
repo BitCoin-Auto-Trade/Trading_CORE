@@ -12,6 +12,8 @@ anyio==4.9.0
     # via
     #   starlette
     #   watchfiles
+apscheduler==3.11.0
+    # via -r /Users/hhee4455/Documents/GitHub/Trading_CORE/requirements.in
 attrs==25.3.0
     # via service-identity
 blinker==1.9.0
@@ -182,7 +184,9 @@ typing-inspection==0.4.1
 tzdata==2025.2
     # via pandas
 tzlocal==5.3.1
-    # via dateparser
+    # via
+    #   apscheduler
+    #   dateparser
 ujson==5.10.0
     # via
     #   unicorn-binance-rest-api
