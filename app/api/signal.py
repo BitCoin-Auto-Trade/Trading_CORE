@@ -1,15 +1,16 @@
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
+import redis
 
-from app.core.db import get_db
+from app.core.db import get_db, get_redis
 from app.services.signal import SignalService
 from app.schemas.signal import TradingSignal
 
 router = APIRouter()
 
 # --- Dependency Injection --- 
-def get_signal_service(db: Session = Depends(get_db)) -> SignalService:
-    return SignalService(db=db)
+def get_signal_service(db: Session = Depends(get_db), redis_client: redis.Redis = Depends(get_redis)) -> SignalService:
+    return SignalService(db=db, redis_client=redis_client)
 
 
 @router.get("/trading-signal/rsi/{symbol}", response_model=TradingSignal)
