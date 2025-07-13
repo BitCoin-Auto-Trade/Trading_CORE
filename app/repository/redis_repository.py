@@ -2,14 +2,17 @@
 Redis 관련 데이터 접근을 처리하는 모듈입니다.
 실시간 데이터를 Redis에서 조회합니다.
 """
+
 import json
 import redis
+
 
 class RedisRepository:
     """
     Redis 관련 작업을 위한 리포지토리 클래스.
     - `redis_client`: Redis 클라이언트 객체
     """
+
     def __init__(self, redis_client: redis.Redis):
         self.redis_client = redis_client
 

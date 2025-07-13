@@ -13,8 +13,9 @@ redis_client = redis.Redis(
     port=settings.REDIS_PORT,
     db=settings.REDIS_DB,
     password=settings.REDIS_PASSWORD,
-    decode_responses=True  # 응답을 UTF-8로 디코딩하여 문자열로 받습니다.
+    decode_responses=True,  # 응답을 UTF-8로 디코딩하여 문자열로 받습니다.
 )
+
 
 # DB 세션을 얻기 위한 Dependency
 def get_db():
@@ -23,6 +24,7 @@ def get_db():
         yield db
     finally:
         db.close()
+
 
 # Redis 클라이언트를 얻기 위한 Dependency
 def get_redis():
