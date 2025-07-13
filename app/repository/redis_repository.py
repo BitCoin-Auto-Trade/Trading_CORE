@@ -25,14 +25,24 @@ class RedisRepository:
         data = self.redis_client.get(key)
         return json.loads(data) if data else None
 
-    def get_order_book_depth(self, symbol: str):
+    def get_order_book_depth(self, symbol: str, limit: int = 100):
         """
         특정 심볼의 실시간 오더북 데이터를 Redis에서 조회합니다.
         - `symbol`: 조회할 심볼 (예: "BTCUSDT")
         """
         key = f"binance:depth:{symbol.lower()}"
         data = self.redis_client.get(key)
-        return json.loads(data) if data else None
+
+        if not data:
+            return None
+    
+        order_book = json.loads(data)
+
+        if isinstance(order_book, dict) and 'bids' in order_book and 'asks' in order_book:
+            order_book['bids'] = order_book['bids'][:limit]
+            order_book['asks'] = order_book['asks'][:limit]
+        
+        return order_book
 
     def get_recent_trades(self, symbol: str, limit: int = 100):
         """

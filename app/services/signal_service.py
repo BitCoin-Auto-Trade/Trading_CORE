@@ -79,6 +79,9 @@ class SignalService:
         if df.empty:
             return pd.DataFrame()
 
+        # 기술적 지표 계산을 위해 오름차순으로 정렬
+        df = df.sort_index(ascending=True)
+
         # --- 추가 지표 계산 ---
         df["volume_sma"] = df["volume"].rolling(20).mean()  # 거래량 이동평균
         df["volume_ratio"] = df["volume"] / df["volume_sma"]  # 거래량 비율
@@ -87,7 +90,11 @@ class SignalService:
             df["high"].rolling(20).std() / df["close"].rolling(20).mean()
         )  # 변동성
 
-        return df # 최신 데이터가 위로 오도록 정렬된 상태로 받음
+        # 분석을 위해 다시 내림차순으로 정렬 (최신 데이터가 위로)
+        df = df.sort_index(ascending=False)
+
+        # 계산 과정에서 발생한 NaN 값 제거
+        return df.dropna()
 
 
     def _analyze_trend_context(self, df: pd.DataFrame) -> Dict:
@@ -115,7 +122,7 @@ class SignalService:
     ) -> tuple[str, float, dict]:
         """가격 및 거래량 모멘텀을 분석하여 신호와 점수를 반환합니다."""
         if len(df) < 50:
-            return "HOLD", 0, {}
+            return "HOLD", 0, {"normalized_momentum": 0, "volume_ratio": 0}
 
         latest = df.iloc[0]
         scores = []
