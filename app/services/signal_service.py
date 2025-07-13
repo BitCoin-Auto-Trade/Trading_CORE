@@ -35,7 +35,7 @@ class SignalService:
 
         # --- 리스크 관리 설정 ---
         self.last_signal_time: Dict[str, datetime] = {}  # 심볼별 마지막 신호 발생 시간
-        self.min_signal_interval = timedelta(minutes=5)  # 최소 신호 발생 간격
+        self.min_signal_interval = timedelta(minutes=2)  # 최소 신호 발생 간격
         self.consecutive_losses = 0  # 연속 손실 횟수
         self.max_consecutive_losses = 3  # 최대 연속 손실 허용 횟수
         self.active_hours = [(9, 24), (0, 2)]  # 거래 활성 시간 (한국 시간 기준)
@@ -277,11 +277,11 @@ class SignalService:
 
         # --- 점수 가중 합산 ---
         trend_weight = trend_context["strength"]
-        # 추세가 강할수록 모멘텀 가중치 증가, 기술적 지표 및 오더북 가중치 감소
+        # (추천안) 추세 영향력은 줄이고, 모멘텀/오더북 기본 가중치 상향
         m_w, t_w, o_w = (
-            0.4 + (0.2 * trend_weight),
-            0.4 - (0.1 * trend_weight),
-            0.2 - (0.1 * trend_weight),
+            0.45 + (0.1 * trend_weight),  # 모멘텀 가중치
+            0.35 - (0.05 * trend_weight),  # 기술적 지표 가중치
+            0.20 - (0.05 * trend_weight),  # 오더북 가중치
         )
         final_score = (m_score * m_w) + (t_score * t_w) + (o_score * o_w)
 
