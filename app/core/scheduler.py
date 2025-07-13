@@ -69,7 +69,9 @@ async def process_signals_for_entry():
                         f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {signal_data.confidence_score:.2f} (OrderService 전달 완료)"
                     )
                 else:
-                    logger.debug(f"  - [{symbol}] 신호: HOLD, 별도 처리 없음")
+                    logger.info(
+                        f"  - [{symbol}] 신호: HOLD, 점수: {signal_data.confidence_score:.2f} (진입 조건 미충족)"
+                    )
 
             except Exception as e:
                 logger.error(f"[{symbol}] 신호 분석 중 오류 발생: {e}", exc_info=True)

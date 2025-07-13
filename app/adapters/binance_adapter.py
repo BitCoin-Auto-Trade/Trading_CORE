@@ -66,6 +66,16 @@ class BinanceAdapter:
     def get_trades(self, symbol: str, limit: int) -> list[schemas.TradeData]:
         return self.redis_repo.get_recent_trades(symbol, limit)
 
+    async def get_current_price(self, symbol: str) -> float | None:
+        """지정된 심볼의 현재 가격을 API를 통해 직접 조회합니다."""
+        try:
+            ticker = self.client.get_symbol_ticker(symbol=symbol)
+            return float(ticker["price"])
+        except Exception as e:
+            # 로깅 추가를 고려해볼 수 있습니다.
+            print(f"Error fetching price for {symbol}: {e}")
+            return None
+
     # --- 계좌 및 주문 (Binance API) ---
     def get_position_info(self) -> list[schemas.PositionInfo]:
         positions = self.client.futures_position_information()

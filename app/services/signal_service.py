@@ -201,6 +201,7 @@ class SignalService:
             "rsi": latest["rsi_14"],
             "macd": latest["macd"],
             "stoch_k": latest.get("stoch_k"),
+            "close_price": latest["close"],
         }
         signal = "BUY" if total_score > 1 else "SELL" if total_score < -1 else "HOLD"
         return signal, total_score, info

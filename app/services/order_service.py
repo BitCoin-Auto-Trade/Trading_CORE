@@ -60,20 +60,20 @@ class OrderService:
 
             position_data = {
                 "side": side,
-                "entry_price": entry_price,
-                "position_size": position_size,
-                "initial_stop_loss": initial_stop_loss,
-                "current_stop_loss": initial_stop_loss,
-                "initial_risk_distance": initial_risk_distance,
+                "entry_price": float(entry_price),
+                "position_size": float(position_size),
+                "initial_stop_loss": float(initial_stop_loss),
+                "current_stop_loss": float(initial_stop_loss),
+                "initial_risk_distance": float(initial_risk_distance),
                 "trailing_stop_activated": "False",
-                "highest_price_so_far": entry_price,
-                "lowest_price_so_far": entry_price,
+                "highest_price_so_far": float(entry_price),
+                "lowest_price_so_far": float(entry_price),
             }
             self.redis.hmset(position_key, position_data)
             logger.info(
-                f"✅ [{signal.symbol}] 신규 포지션 진입 | 방향: {side} | "
-                f"진입가: {entry_price:.4f} | 초기 손절가: {initial_stop_loss:.4f} | "
-                f"수량: {position_size}"
+                f"[{signal.symbol}] 신규 포지션 진입 | 방향: {side} | "
+                f"진입가: {float(entry_price):.4f} | 초기 손절가: {float(initial_stop_loss):.4f} | "
+                f"수량: {float(position_size)}"
             )
 
     async def monitor_positions(self):
@@ -88,8 +88,8 @@ class OrderService:
                     continue
 
                 for key in position_keys:
-                    symbol = key.decode().split(":")[1]
-                    position = {k.decode(): v.decode() for k, v in self.redis.hgetall(key).items()}
+                    symbol = key.split(":")[1]
+                    position = self.redis.hgetall(key)
                     
                     current_price = await self.binance_adapter.get_current_price(symbol)
                     if not current_price:
@@ -139,7 +139,7 @@ class OrderService:
                            (side == "SHORT" and current_price <= activation_price_short):
                             self.redis.hset(key, "trailing_stop_activated", "True")
                             trailing_activated = True
-                            logger.info(f"📈 [{symbol}] 동적 익절(Trailing Stop) 활성화. 현재가: {current_price}")
+                            logger.info(f"[{symbol}] 동적 익절(Trailing Stop) 활성화. 현재가: {current_price}")
 
                     # 2b. 활성화된 경우, 손절선 업데이트
                     if trailing_activated:
@@ -154,7 +154,7 @@ class OrderService:
                             new_stop_loss = highest_price - (atr_val * self.trailing_stop_atr_multiplier)
                             if new_stop_loss > current_stop_loss:
                                 self.redis.hset(key, "current_stop_loss", new_stop_loss)
-                                logger.info(f"📈 [{symbol}] 롱 포지션 손절선 상향 조정: {new_stop_loss:.4f}")
+                                logger.info(f"[{symbol}] 롱 포지션 손절선 상향 조정: {new_stop_loss:.4f}")
 
                         elif side == "SHORT":
                             lowest_price = min(float(position["lowest_price_so_far"]), current_price)
@@ -163,7 +163,7 @@ class OrderService:
                             new_stop_loss = lowest_price + (atr_val * self.trailing_stop_atr_multiplier)
                             if new_stop_loss < current_stop_loss:
                                 self.redis.hset(key, "current_stop_loss", new_stop_loss)
-                                logger.info(f"📉 [{symbol}] 숏 포지션 손절선 하향 조정: {new_stop_loss:.4f}")
+                                logger.info(f"[{symbol}] 숏 포지션 손절선 하향 조정: {new_stop_loss:.4f}")
 
             except Exception as e:
                 logger.error(f"포지션 모니터링 중 오류 발생: {e}", exc_info=True)
