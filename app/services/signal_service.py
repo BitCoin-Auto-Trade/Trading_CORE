@@ -25,9 +25,8 @@ class SignalService:
         self.risk_per_trade = 0.02  # 거래당 리스크 비율 (계좌 잔고 대비)
         self.account_balance = 10000  # 초기 계좌 잔고 (TODO: 실제 잔고와 연동 필요)
 
-        # --- 손절 및 익절 설정 ---
+        # --- 손절 설정 ---
         self.atr_multiplier = 1.5  # 손절 계산 시 사용할 ATR 배수
-        self.tp_ratio = 1.5  # 익절 비율 (손절 대비)
 
         # --- 단타(Scalping) 특화 임계값 ---
         self.volume_spike_threshold = 2.0  # 거래량 급증 판단 기준 (이동평균 대비)
@@ -298,16 +297,15 @@ class SignalService:
             final_signal = "HOLD"
 
         sl_price, tp_price, pos_size = None, None, 0
-        # 매수/매도 신호일 경우 손절/익절 가격 및 포지션 크기 계산
+        # 매수/매도 신호일 경우 손절 가격 및 포지션 크기 계산
         if final_signal in ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"]:
             atr = latest.get("ATRr_14", current_price * 0.01)
             if "BUY" in final_signal:
                 sl_price = current_price - atr * self.atr_multiplier
-                tp_price = current_price + atr * self.atr_multiplier * self.tp_ratio
             else:  # SELL
                 sl_price = current_price + atr * self.atr_multiplier
-                tp_price = current_price - atr * self.atr_multiplier * self.tp_ratio
 
+            tp_price = None  # 동적 익절을 위해 익절가는 None으로 설정
             pos_size = self._calculate_position_size(current_price, sl_price)
             self.last_signal_time[symbol] = datetime.now()
 

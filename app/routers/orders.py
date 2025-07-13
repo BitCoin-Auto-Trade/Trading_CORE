@@ -5,34 +5,70 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 import redis
-from typing import Optional, List, Any
+from typing import Optional, List, Any, Dict
 
 from app.core.db import get_db, get_redis
 from app.services.order_service import OrderService
 from app.adapters.binance_adapter import BinanceAdapter
 from app.schemas import core as schemas
+from app.services.signal_service import SignalService
+from app.repository.db_repository import DBRepository
+
 
 router = APIRouter()
 
+
 # --- Dependency Injection --- #
 
+def get_db_repository(db: Session = Depends(get_db)) -> DBRepository:
+    return DBRepository(db=db)
 
 def get_binance_adapter(
     db: Session = Depends(get_db), redis_client: redis.Redis = Depends(get_redis)
 ) -> BinanceAdapter:
-    """
-    Injects a BinanceAdapter instance.
-    """
     return BinanceAdapter(db=db, redis_client=redis_client)
 
+def get_signal_service(
+    db_repo: DBRepository = Depends(get_db_repository),
+    binance_adapter: BinanceAdapter = Depends(get_binance_adapter),
+) -> SignalService:
+    return SignalService(db_repository=db_repo, binance_adapter=binance_adapter)
 
 def get_order_service(
+    db_repo: DBRepository = Depends(get_db_repository),
     binance_adapter: BinanceAdapter = Depends(get_binance_adapter),
+    signal_service: SignalService = Depends(get_signal_service),
+    redis_client: redis.Redis = Depends(get_redis),
 ) -> OrderService:
+    return OrderService(
+        db_repository=db_repo,
+        binance_adapter=binance_adapter,
+        signal_service=signal_service,
+        redis_client=redis_client,
+    )
+
+
+# --- 실시간 전략 상태 조회 API --- #
+
+@router.get(
+    "/active-positions",
+    response_model=List[Dict],
+    summary="Get current active positions managed by OrderService",
+)
+def get_active_positions(redis_client: redis.Redis = Depends(get_redis)):
     """
-    Injects an OrderService instance.
+    OrderService에 의해 현재 관리되고 있는 모든 활성 포지션의 상세 정보를 조회합니다.
+    데이터는 Redis에 저장된 실시간 상태를 반영합니다.
     """
-    return OrderService(binance_adapter=binance_adapter)
+    active_positions = []
+    position_keys = redis_client.keys("position:*")
+    for key in position_keys:
+        position_data = redis_client.hgetall(key)
+        # Redis에서 가져온 데이터는 byte string이므로 utf-8로 디코딩합니다.
+        decoded_data = {k.decode('utf-8'): v.decode('utf-8') for k, v in position_data.items()}
+        decoded_data['symbol'] = key.decode('utf-8').split(':')[1]
+        active_positions.append(decoded_data)
+    return active_positions
 
 
 # --- 바이낸스 정보 조회 API --- #
@@ -61,11 +97,12 @@ def get_futures_account(binance_adapter: BinanceAdapter = Depends(get_binance_ad
 @router.get(
     "/position",
     response_model=List[schemas.PositionInfo],
-    summary="Get current position info",
+    summary="Get current position info from Binance",
 )
 def get_position(binance_adapter: BinanceAdapter = Depends(get_binance_adapter)):
     """
-    현재 보유 중인 모든 포지션의 상세 정보를 조회합니다. (포지션이 있는 심볼만 필터링)
+    현재 바이낸스 거래소에 실제 보유 중인 모든 포지션의 상세 정보를 조회합니다.
+    (OrderService가 관리하는 포지션과 다를 수 있습니다.)
     """
     return binance_adapter.get_position_info()
 
