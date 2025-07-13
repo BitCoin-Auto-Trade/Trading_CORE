@@ -13,6 +13,7 @@ class Kline_1m(Base):
     volume = Column(Float)
     ema_20 = Column(Float, nullable=True)
     rsi_14 = Column(Float, nullable=True)
-    macd = Column(Float, nullable=True)
-    macd_signal = Column(Float, nullable=True)
-    macd_hist = Column(Float, nullable=True)
+    macd: float | None = None
+    macd_signal: float | None = None
+    macd_hist: float | None = None
+    atr: float | None = Column(Float, nullable=True)
