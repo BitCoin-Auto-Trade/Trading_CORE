@@ -35,7 +35,7 @@ def get_services() -> tuple[SignalService, OrderService, DBRepository]:
     try:
         db_repo = DBRepository(db=db)
         binance_adapter = BinanceAdapter(db=db, redis_client=redis_client)
-        signal_service = SignalService(db_repository=db_repo, binance_adapter=binance_adapter)
+        signal_service = SignalService(db_repository=db_repo, binance_adapter=binance_adapter, redis_client=redis_client)
         order_service = OrderService(
             db_repository=db_repo,
             binance_adapter=binance_adapter,

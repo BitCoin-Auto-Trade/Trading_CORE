@@ -8,16 +8,24 @@ from typing import Dict
 from app.schemas.core import TradingSignal
 from app.repository.db_repository import DBRepository
 from app.adapters.binance_adapter import BinanceAdapter
+import redis
+import logging
 
-
+logger = logging.getLogger(__name__)
 class SignalService:
     """
     다양한 지표와 시장 상황을 종합하여 매매 신호를 생성하는 서비스 클래스.
     """
 
-    def __init__(self, db_repository: DBRepository, binance_adapter: BinanceAdapter):
+    def __init__(
+        self,
+        db_repository: DBRepository,
+        binance_adapter: BinanceAdapter,
+        redis_client: redis.Redis
+    ):
         self.db_repository = db_repository
         self.binance_adapter = binance_adapter
+        self.redis_client = redis_client
 
         # --- 기본 거래 설정 ---
         self.timeframe = "1m"  # 분석에 사용할 시간봉
@@ -76,6 +84,13 @@ class SignalService:
         """DB에서 K-line 데이터와 미리 계산된 지표를 가져와 데이터프레임을 준비합니다."""
         df = self.db_repository.get_klines_by_symbol_as_df(symbol, limit=500)
         if df.empty:
+            return pd.DataFrame()
+        
+        # 필수 컬럼 존재 확인
+        required_columns = ["ema_20", "sma_50", "sma_200", "rsi_14", "macd", "atr"]
+        missing_columns = [col for col in required_columns if col not in df.columns]
+        if missing_columns:
+            logger.error(f"Missing columns in DB: {missing_columns}")
             return pd.DataFrame()
 
         # 기술적 지표 계산을 위해 오름차순으로 정렬
@@ -300,7 +315,7 @@ class SignalService:
         sl_price, tp_price, pos_size = None, None, 0
         # 매수/매도 신호일 경우 손절 가격 및 포지션 크기 계산
         if final_signal in ["STRONG_BUY", "BUY", "STRONG_SELL", "SELL"]:
-            atr = latest.get("ATRr_14", current_price * 0.01)
+            atr = latest.get("atr", current_price * 0.01)
             if "BUY" in final_signal:
                 sl_price = current_price - atr * self.atr_multiplier
             else:  # SELL
@@ -327,7 +342,7 @@ class SignalService:
             f"포지션 크기: {pos_size:.4f} | 연속손실: {self.consecutive_losses}"
         )
 
-        return TradingSignal(
+        final_trading_signal = TradingSignal(
             symbol=symbol,
             timestamp=latest.name,
             signal=final_signal,
@@ -343,6 +358,12 @@ class SignalService:
                 "orderbook": o_info,
             },
         )
+
+        # Redis에 최종 매매 신호 저장
+        redis_key = f"trading_signal:{symbol.upper()}"
+        self.redis_client.set(redis_key, final_trading_signal.model_dump_json())
+
+        return final_trading_signal
 
     def update_performance(self, result: str):
         """거래 결과에 따라 연속 손실 횟수를 업데이트합니다."""

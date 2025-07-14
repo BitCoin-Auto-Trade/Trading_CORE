@@ -110,7 +110,7 @@ class OrderService:
                             # 동적 익절(수익 실현)
                             profit = (current_price - entry_price) if side == "LONG" else (entry_price - current_price)
                             logger.info(
-                                f"💰 [{symbol}] 동적 익절(수�� 실현) | 방향: {side} | "
+                                f"[{symbol}] 동적 익절(수익 실현) | 방향: {side} | "
                                 f"진입가: {entry_price:.4f} | 종료가: {current_price:.4f} | "
                                 f"수익: ${profit:.4f}"
                             )
