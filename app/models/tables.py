@@ -33,6 +33,10 @@ class Kline_1m(Base):
     bb_lower = Column(Float, nullable=True)
     stoch_k = Column(Float, nullable=True)
     stoch_d = Column(Float, nullable=True)
+    volume_sma_20 = Column(Float, nullable=True)     
+    volume_ratio = Column(Float, nullable=True)       
+    price_momentum_5m = Column(Float, nullable=True)
+    volatility_20d = Column(Float, nullable=True) 
 
 
 class FundingRate(Base):
