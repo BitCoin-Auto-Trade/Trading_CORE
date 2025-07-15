@@ -31,8 +31,9 @@ def get_binance_adapter(
 def get_signal_service(
     db_repo: DBRepository = Depends(get_db_repository),
     binance_adapter: BinanceAdapter = Depends(get_binance_adapter),
+    redis_client: redis.Redis = Depends(get_redis),
 ) -> SignalService:
-    return SignalService(db_repository=db_repo, binance_adapter=binance_adapter)
+    return SignalService(db_repository=db_repo, binance_adapter=binance_adapter, redis_client=redis_client)
 
 def get_order_service(
     db_repo: DBRepository = Depends(get_db_repository),

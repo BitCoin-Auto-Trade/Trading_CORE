@@ -72,8 +72,9 @@ class BinanceAdapter:
             ticker = self.client.get_symbol_ticker(symbol=symbol)
             return float(ticker["price"])
         except Exception as e:
-            # 로깅 추가를 고려해볼 수 있습니다.
-            print(f"Error fetching price for {symbol}: {e}")
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error fetching price for {symbol}: {e}")
             return None
 
     # --- 계좌 및 주문 (Binance API) ---

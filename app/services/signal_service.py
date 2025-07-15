@@ -173,16 +173,34 @@ class SignalService:
     def get_combined_trading_signal(self, symbol: str) -> TradingSignal:
         can_signal, reason = self._should_generate_signal(symbol)
         if not can_signal:
-            return TradingSignal(symbol=symbol, signal="HOLD", message=reason)
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(),
+                signal="HOLD", 
+                confidence_score=0.0,
+                message=reason
+            )
 
         df = self._prepare_data(symbol)
         if len(df) < 2:
-            return TradingSignal(symbol=symbol, signal="HOLD", message="분석을 위한 데이터 부족")
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(),
+                signal="HOLD", 
+                confidence_score=0.0,
+                message="분석을 위한 데이터 부족"
+            )
 
         try:
             latest, previous = df.iloc[0], df.iloc[1]
         except IndexError:
-            return TradingSignal(symbol=symbol, signal="HOLD", message="데이터프레임 인덱싱 오류")
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(),
+                signal="HOLD", 
+                confidence_score=0.0,
+                message="데이터프레임 인덱싱 오류"
+            )
 
         current_price = latest["close"]
         volatility = latest.get("volatility_20d", 0.01)
@@ -219,9 +237,13 @@ class SignalService:
         self.signal_history.append(locals())
 
         return TradingSignal(
-            symbol=symbol, timestamp=latest.name, signal=final_signal,
-            stop_loss_price=sl_price, position_size=pos_size,
-            confidence_score=abs(final_score), message=message,
+            symbol=symbol, 
+            timestamp=latest.name if hasattr(latest, 'name') and latest.name else datetime.now(),
+            signal=final_signal,
+            stop_loss_price=sl_price, 
+            position_size=pos_size,
+            confidence_score=abs(final_score), 
+            message=message,
             metadata={
                 "trend": trend_context, "momentum": m_info, "tech": t_info, "orderbook": o_info,
                 "weights": {"m": m_w, "t": t_w, "o": o_w}, "volatility": volatility

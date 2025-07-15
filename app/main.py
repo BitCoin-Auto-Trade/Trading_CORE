@@ -31,8 +31,7 @@ async def lifespan(app: FastAPI):
         logger.info("Redis에 성공적으로 연결되었습니다.")
     except Exception as e:
         logger.error(f"Redis 연결 실패: {e}")
-        # Redis 연결 실패 시, 앱 실행을 중단하거나 재시도 로직 추가 가능
-        return
+        raise RuntimeError("Redis 연결에 실패했습니다. 애플리케이션을 시작할 수 없습니다.")
 
     # 서비스 인스턴스 생성
     # lifespan 동안 단일 DB 세션을 사용하여 서비스 인스턴스 생성

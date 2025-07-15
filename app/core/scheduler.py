@@ -6,6 +6,7 @@ APScheduler를 사용하여 주기적인 작업을 관리하는 모듈입니다.
 - 매 분 정해진 시간에 주요 심볼의 매매 신호를 분석하고 OrderService로 전달합니다.
 """
 
+import json
 import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import sessionmaker
@@ -63,14 +64,21 @@ async def process_signals_for_entry():
         for symbol in symbols:
             try:
                 signal_data = signal_service.get_combined_trading_signal(symbol)
+                
+                # Redis에 신호 저장
+                redis_key = f"trading_signal:{symbol}"
+                redis_client.setex(redis_key, 3600, json.dumps(signal_data.model_dump(), default=str))
+                
                 if signal_data.signal != "HOLD":
                     await order_service.process_signal(signal_data)
+                    confidence_str = f"{signal_data.confidence_score:.2f}" if signal_data.confidence_score is not None else "N/A"
                     logger.info(
-                        f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {signal_data.confidence_score:.2f} (OrderService 전달 완료)"
+                        f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {confidence_str} (OrderService 전달 완료)"
                     )
                 else:
+                    confidence_str = f"{signal_data.confidence_score:.2f}" if signal_data.confidence_score is not None else "N/A"
                     logger.info(
-                        f"  - [{symbol}] 신호: HOLD, 점수: {signal_data.confidence_score:.2f} (진입 조건 미충족)"
+                        f"  - [{symbol}] 신호: HOLD, 점수: {confidence_str} (진입 조건 미충족)"
                     )
 
             except Exception as e:
