@@ -1,4 +1,3 @@
-
 """
 APScheduler를 사용하여 주기적인 작업을 관리하는 모듈입니다.
 
@@ -7,7 +6,6 @@ APScheduler를 사용하여 주기적인 작업을 관리하는 모듈입니다.
 """
 
 import json
-import logging
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.orm import sessionmaker
 
@@ -17,8 +15,9 @@ from app.services.signal_service import SignalService
 from app.services.order_service import OrderService
 from app.adapters.binance_adapter import BinanceAdapter
 from app.repository.db_repository import DBRepository
+from app.utils.logging import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 # 스케줄링된 작업 내에서 독립적인 DB 세션을 생성하기 위한 세션 메이커입니다.
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -36,7 +35,11 @@ def get_services() -> tuple[SignalService, OrderService, DBRepository]:
     try:
         db_repo = DBRepository(db=db)
         binance_adapter = BinanceAdapter(db=db, redis_client=redis_client)
-        signal_service = SignalService(db_repository=db_repo, binance_adapter=binance_adapter, redis_client=redis_client)
+        signal_service = SignalService(
+            db_repository=db_repo, 
+            binance_adapter=binance_adapter, 
+            redis_client=redis_client
+        )
         order_service = OrderService(
             db_repository=db_repo,
             binance_adapter=binance_adapter,
@@ -52,14 +55,27 @@ def get_services() -> tuple[SignalService, OrderService, DBRepository]:
 
 async def process_signals_for_entry():
     """
-    설정에 정의된 모든 심볼의 매매 신호를 분석하고, 그 결과를 OrderService로 전달합니다.
+    설정에 정의된 모든 심볼의 매매 신호를 분석하고, 자동 거래가 활성화된 경우 API를 호출합니다.
     이 함수는 스케줄러에 의해 주기적으로 실행됩니다.
     """
+    # 자동 거래 상태 확인
+    try:
+        auto_trading_enabled_str = redis_client.get("auto_trading_enabled")
+        auto_trading_enabled = (
+            auto_trading_enabled_str == "True" 
+            if auto_trading_enabled_str 
+            else settings.TRADING.AUTO_TRADING_ENABLED
+        )
+    except Exception as e:
+        logger.error(f"Redis에서 자동 거래 상태 확인 실패: {e}")
+        auto_trading_enabled = settings.TRADING.AUTO_TRADING_ENABLED
+    
     symbols = [symbol.strip() for symbol in settings.TRADING_SYMBOLS.split(",")]
     signal_service, order_service, db_repo = None, None, None
+    
     try:
         signal_service, order_service, db_repo = get_services()
-        logger.info(f"[스케줄링 작업] {len(symbols)}개 심볼의 포지션 진입 신호 분석을 시작합니다...")
+        logger.info(f"[스케줄링 작업] {len(symbols)}개 심볼의 포지션 진입 신호 분석을 시작합니다... (자동거래: {'ON' if auto_trading_enabled else 'OFF'})")
 
         for symbol in symbols:
             try:
@@ -67,27 +83,37 @@ async def process_signals_for_entry():
                 
                 # Redis에 신호 저장
                 redis_key = f"trading_signal:{symbol}"
-                redis_client.setex(redis_key, 3600, json.dumps(signal_data.model_dump(), default=str))
+                try:
+                    redis_client.setex(redis_key, 3600, json.dumps(signal_data.model_dump(), default=str))
+                except Exception as e:
+                    logger.error(f"Redis에 신호 저장 실패 [{symbol}]: {e}")
                 
                 if signal_data.signal != "HOLD":
-                    await order_service.process_signal(signal_data)
                     confidence_str = f"{signal_data.confidence_score:.2f}" if signal_data.confidence_score is not None else "N/A"
-                    logger.info(
-                        f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {confidence_str} (OrderService 전달 완료)"
-                    )
+                    
+                    if auto_trading_enabled:
+                        # 자동 거래 활성화 시 주문 실행
+                        await order_service.process_signal(signal_data)
+                        logger.info(f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {confidence_str} (자동 주문 실행됨)")
+                    else:
+                        # 자동 거래 비활성화 시 신호만 기록
+                        logger.info(f"  - [{symbol}] 신호: {signal_data.signal}, 점수: {confidence_str} (자동거래 비활성화됨)")
                 else:
                     confidence_str = f"{signal_data.confidence_score:.2f}" if signal_data.confidence_score is not None else "N/A"
-                    logger.info(
-                        f"  - [{symbol}] 신호: HOLD, 점수: {confidence_str} (진입 조건 미충족)"
-                    )
+                    logger.info(f"  - [{symbol}] 신호: HOLD, 점수: {confidence_str} (진입 조건 미충족)")
 
             except Exception as e:
                 logger.error(f"[{symbol}] 신호 분석 중 오류 발생: {e}", exc_info=True)
 
+    except Exception as e:
+        logger.error(f"스케줄링 작업 실행 중 오류 발생: {e}", exc_info=True)
     finally:
         if db_repo:
-            db_repo.db.close()
-            logger.debug("DB 세션이 성공적으로 종료되었습니다.")
+            try:
+                db_repo.db.close()
+                logger.debug("DB 세션이 성공적으로 종료되었습니다.")
+            except Exception as e:
+                logger.error(f"DB 세션 종료 중 오류 발생: {e}")
 
 
 def start_scheduler():

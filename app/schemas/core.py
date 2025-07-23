@@ -122,3 +122,19 @@ class TradingSignal(BaseModel):
     confidence_score: float | None = None
     message: str | None = None
     metadata: dict | None = None
+
+
+# --- Settings Schemas ---
+class TradingSettings(BaseModel):
+    TIMEFRAME: str = "1m"
+    LEVERAGE: int = 10
+    RISK_PER_TRADE: float = 0.02
+    ACCOUNT_BALANCE: float = 10000.0
+    AUTO_TRADING_ENABLED: bool = True
+    ATR_MULTIPLIER: float = 1.5
+    TP_RATIO: float = 1.5
+    VOLUME_SPIKE_THRESHOLD: float = 2.0
+    PRICE_MOMENTUM_THRESHOLD: float = 0.003
+    MIN_SIGNAL_INTERVAL_MINUTES: int = 5
+    MAX_CONSECUTIVE_LOSSES: int = 3
+    ACTIVE_HOURS: List[tuple[int, int]] = [(9, 24), (0, 2)]
