@@ -45,11 +45,11 @@ class BinanceAdapter:
             )
             
             client = Client(api_key, api_secret, tld="com", testnet=testnet)
-            logger.info(f"Binance 클라이언트 생성 완료", testnet=testnet)
+            logger.info(f"Binance 클라이언트 생성 완료 (testnet={testnet})")
             return client
             
         except Exception as e:
-            logger.error(f"Binance 클라이언트 생성 실패", testnet=testnet, error=str(e))
+            logger.error(f"Binance 클라이언트 생성 실패 (testnet={testnet}): {e}", extra={"error": str(e)})
             raise BinanceAdapterException(f"Binance 클라이언트 생성 실패: {str(e)}")
 
     # --- 과거 데이터 (DB) ---

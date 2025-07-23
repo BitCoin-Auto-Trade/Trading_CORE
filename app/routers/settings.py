@@ -7,17 +7,16 @@ import redis
 
 from app.dependencies import RedisClient
 from app.schemas.core import TradingSettings
-from app.utils.helpers import create_api_response
 from app.utils.logging import get_logger
 from app.core.constants import REDIS_KEYS
 
 router = APIRouter()
 logger = get_logger(__name__)
 
-SETTINGS_KEY = REDIS_KEYS["TRADING_SETTINGS"] # "trading_settings"
+SETTINGS_KEY = REDIS_KEYS["TRADING_SETTINGS"]
 
 @router.get("/trading", response_model=TradingSettings)
-def get_trading_settings(redis_client: RedisClient = Depends()):
+def get_trading_settings(redis_client: RedisClient):
     """현재 거래 설정을 조회합니다."""
     settings_data = redis_client.hgetall(SETTINGS_KEY)
     if not settings_data:
@@ -31,7 +30,7 @@ def get_trading_settings(redis_client: RedisClient = Depends()):
 @router.post("/trading", response_model=TradingSettings)
 def update_trading_settings(
     settings: TradingSettings,
-    redis_client: RedisClient = Depends()
+    redis_client: RedisClient
 ):
     """새로운 거래 설정을 업데이트합니다."""
     try:

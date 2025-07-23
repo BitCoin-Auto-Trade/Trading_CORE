@@ -17,6 +17,7 @@ REDIS_KEYS: Final = {
     "RISK_PER_TRADE": "risk_per_trade",
     "MAX_POSITIONS": "max_positions",
     "TRADING_SYMBOLS": "trading_symbols",
+    "TRADING_SETTINGS": "trading_settings",
 }
 
 # 거래 관련 상수

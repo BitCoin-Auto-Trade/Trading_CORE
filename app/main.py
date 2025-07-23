@@ -49,7 +49,7 @@ async def lifespan(app: FastAPI):
     logger.info("OrderService 포지션 모니터링이 백그라운드에서 시작되었습니다.")
 
     # 스케줄러 시작 (진입 신호 분석용)
-    start_scheduler()
+    start_scheduler(signal_service=signal_service, order_service=order_service)
 
     yield
 
