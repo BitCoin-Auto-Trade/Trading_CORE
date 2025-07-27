@@ -23,16 +23,51 @@ def get_realtime_klines(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     interval: str = Query("1m", description="시간 간격 (예: 1m, 5m, 1h)"),
     limit: int = Query(1, description="조회할 캔들 개수"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter)
+    binance_adapter: BinanceAdapter = Depends(get_binance_adapter),
+    db_repository: DBRepository = Depends(get_db_repository)
 ):
     """실시간 K-라인 데이터를 조회합니다."""
     if interval == "1m":
-        data = binance_adapter.get_kline_1m(symbol.upper())
-        return create_api_response(
-            success=True,
-            data=[data] if data else [],
-            message="K-라인 데이터 조회 완료"
-        )
+        if limit == 1:
+            # 1개만 요청할 때는 실시간 데이터
+            data = binance_adapter.get_kline_1m(symbol.upper())
+            return create_api_response(
+                success=True,
+                data=[data] if data else [],
+                message="K-라인 데이터 조회 완료"
+            )
+        else:
+            # 여러 개 요청할 때는 DB에서 기술적 지표가 포함된 데이터
+            df = db_repository.get_klines_by_symbol_as_df(symbol.upper(), limit)
+            if df.empty:
+                return create_api_response(
+                    success=True,
+                    data=[],
+                    message="조회할 데이터가 없습니다"
+                )
+            
+            # DataFrame을 Binance API 형식으로 변환
+            data = []
+            for _, row in df.iterrows():
+                timestamp = int(row.name.timestamp() * 1000)  # milliseconds
+                kline_data = {
+                    "t": timestamp,
+                    "T": timestamp + 59999,  # 1분 캔들의 종료 시간
+                    "s": row.get("symbol"),
+                    "o": str(row.get("open", 0)),
+                    "c": str(row.get("close", 0)),
+                    "h": str(row.get("high", 0)),
+                    "l": str(row.get("low", 0)),
+                    "v": str(row.get("volume", 0)),
+                    "x": True  # 캔들이 완료되었는지 여부
+                }
+                data.append(kline_data)
+            
+            return create_api_response(
+                success=True,
+                data=data,
+                message="K-라인 데이터 조회 완료"
+            )
     else:
         klines = binance_adapter.client.get_klines(
             symbol=symbol.upper(),

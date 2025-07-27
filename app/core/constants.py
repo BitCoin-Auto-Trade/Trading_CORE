@@ -6,6 +6,7 @@ from typing import Final
 # Redis 키 프리픽스
 REDIS_KEYS: Final = {
     "POSITION": "position:",
+    "POSITION_PREFIX": "position:",
     "TRADING_SIGNAL": "trading_signal:",
     "PRICE_PREFIX": "price:",
     "PERFORMANCE": "performance",

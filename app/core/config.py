@@ -40,8 +40,8 @@ class Settings(BaseSettings):
         RISK_PER_TRADE: float = 0.02
         ACCOUNT_BALANCE: float = 10000.0  # TODO: 실제 잔고 연동 필요
 
-        # Auto Trading Control
-        AUTO_TRADING_ENABLED: bool = True  # 자동 거래 활성화 여부
+        # Auto Trading Control - 안전을 위해 처음에는 OFF로 설정
+        AUTO_TRADING_ENABLED: bool = False  # 자동 거래 활성화 여부
 
         # Stop-Loss and Take-Profit
         ATR_MULTIPLIER: float = 1.5

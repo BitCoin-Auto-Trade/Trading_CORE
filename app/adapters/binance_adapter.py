@@ -45,12 +45,15 @@ class BinanceAdapter:
             )
             
             client = Client(api_key, api_secret, tld="com", testnet=testnet)
-            logger.info(f"Binance 클라이언트 생성 완료 (testnet={testnet})")
             return client
             
         except Exception as e:
             logger.error(f"Binance 클라이언트 생성 실패 (testnet={testnet}): {e}", extra={"error": str(e)})
             raise BinanceAdapterException(f"Binance 클라이언트 생성 실패: {str(e)}")
+
+    def is_api_available(self) -> bool:
+        """Binance API 사용 가능 여부를 확인합니다."""
+        return self.client is not None
 
     # --- 과거 데이터 (DB) ---
     def get_klines_data(
@@ -114,6 +117,14 @@ class BinanceAdapter:
     @timeout(timeout_seconds=10)
     async def get_current_price(self, symbol: str) -> float | None:
         """지정된 심볼의 현재 가격을 API를 통해 직접 조회합니다."""
+        # API 사용 불가능한 경우 Redis에서만 조회
+        if not self.is_api_available():
+            cached_price = self.redis_client.get(f"{REDIS_KEYS['PRICE_PREFIX']}{symbol}")
+            if cached_price:
+                return float(cached_price)
+            logger.warning(f"API 비활성화 상태, 캐시된 가격도 없음: {symbol}")
+            return None
+            
         try:
             ticker = self.client.get_symbol_ticker(symbol=symbol)
             price = float(ticker["price"])
@@ -128,6 +139,11 @@ class BinanceAdapter:
             return price
         except Exception as e:
             logger.error(f"현재 가격 조회 실패", symbol=symbol, error=str(e))
+            # API 실패 시 캐시된 값 반환 시도
+            cached_price = self.redis_client.get(f"{REDIS_KEYS['PRICE_PREFIX']}{symbol}")
+            if cached_price:
+                logger.info(f"API 실패로 캐시된 가격 사용: {symbol}")
+                return float(cached_price)
             return None
 
     async def get_latest_price(self, symbol: str) -> float:
@@ -209,6 +225,48 @@ class BinanceAdapter:
         positions = self.client.futures_position_information()
         active_positions = [p for p in positions if float(p["positionAmt"]) != 0]
         return [schemas.PositionInfo.model_validate(p) for p in active_positions]
+
+    async def close_position(self, symbol: str, position_side: str = None) -> Dict[str, Any]:
+        """포지션 전체 종료"""
+        try:
+            # 현재 포지션 정보 조회
+            position_info = self.client.futures_position_information(symbol=symbol)
+            
+            for position in position_info:
+                position_amt = float(position['positionAmt'])
+                
+                # 포지션이 있는 경우에만 종료
+                if position_amt != 0:
+                    # 롱 포지션이면 SELL, 숏 포지션이면 BUY로 종료
+                    side = 'SELL' if position_amt > 0 else 'BUY'
+                    quantity = abs(position_amt)
+                    
+                    # 시장가로 포지션 종료
+                    result = self.client.futures_create_order(
+                        symbol=symbol,
+                        side=side,
+                        type='MARKET',
+                        quantity=quantity,
+                        reduceOnly=True  # 포지션 감소 전용
+                    )
+                    
+                    logger.info(
+                        f"포지션 종료 주문 성공",
+                        symbol=symbol,
+                        side=side,
+                        quantity=quantity,
+                        order_id=result.get('orderId')
+                    )
+                    
+                    return result
+            
+            # 종료할 포지션이 없는 경우
+            logger.warning(f"종료할 포지션이 없습니다: {symbol}")
+            return {"message": "No position to close", "symbol": symbol}
+            
+        except Exception as e:
+            logger.error(f"포지션 종료 실패", symbol=symbol, error=str(e))
+            raise BinanceAdapterException(f"포지션 종료 실패: {str(e)}")
 
     def get_futures_account_balance(self) -> schemas.FuturesAccountInfo:
         account_info = self.client.futures_account()

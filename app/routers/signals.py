@@ -3,7 +3,9 @@
 """
 
 from fastapi import APIRouter, Depends
+from fastapi.responses import JSONResponse
 from typing import Optional
+import json
 
 from app.services.signal_service import SignalService
 from app.utils.helpers import create_api_response
@@ -40,11 +42,17 @@ def get_latest_signal(
         signal = signal_service.get_combined_trading_signal(symbol.upper())
     else:
         signal = signal_service.get_combined_trading_signal("BTCUSDT")  # 기본값
-    return create_api_response(
+    
+    # signal을 dict로 변환
+    signal_dict = signal.dict() if hasattr(signal, 'dict') else signal
+    
+    response_data = create_api_response(
         success=True,
-        data=signal,
+        data=signal_dict,
         message="최신 신호 조회 완료"
     )
+    
+    return JSONResponse(content=response_data)
 
 @router.get(
     "/combined/{symbol}",
@@ -57,11 +65,17 @@ def get_combined_signal(
 ):
     """통합 신호를 조회합니다."""
     signal = signal_service.get_combined_trading_signal(symbol.upper())
-    return create_api_response(
+    
+    # signal을 dict로 변환
+    signal_dict = signal.dict() if hasattr(signal, 'dict') else signal
+    
+    response_data = create_api_response(
         success=True,
-        data=signal,
+        data=signal_dict,
         message=f"{symbol} 통합 신호 조회 완료"
     )
+    
+    return JSONResponse(content=response_data)
 
 @router.post(
     "/generate/{symbol}",
@@ -74,11 +88,17 @@ def generate_signal(
 ):
     """새로운 신호를 생성합니다."""
     signal = signal_service.get_combined_trading_signal(symbol.upper())
-    return create_api_response(
+    
+    # signal을 dict로 변환
+    signal_dict = signal.dict() if hasattr(signal, 'dict') else signal
+    
+    response_data = create_api_response(
         success=True,
-        data=signal,
+        data=signal_dict,
         message=f"{symbol} 신호 생성 완료"
     )
+    
+    return JSONResponse(content=response_data)
 
 @router.get(
     "/cached",
@@ -95,11 +115,17 @@ def get_cached_signals(
         signals = signal_service.get_combined_trading_signal(symbol.upper())
     else:
         signals = signal_service.get_combined_trading_signal("BTCUSDT")
-    return create_api_response(
+    
+    # signals을 dict로 변환
+    signals_dict = signals.dict() if hasattr(signals, 'dict') else signals
+    
+    response_data = create_api_response(
         success=True,
-        data=signals,
+        data=signals_dict,
         message="캐시된 신호 조회 완료"
     )
+    
+    return JSONResponse(content=response_data)
 
 @router.get(
     "/performance",

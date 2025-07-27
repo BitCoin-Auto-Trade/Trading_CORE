@@ -63,10 +63,10 @@ class SignalService:
         """Redis에서 거래 설정을 불러오거나, 없으면 기본값을 사용합니다."""
         settings_data = self.redis_client.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
         if settings_data:
-            logger.info("Redis에서 거래 설정을 불러옵니다.")
+            logger.debug("Redis에서 거래 설정을 불러옵니다.")
             self.settings = TradingSettings.model_validate(settings_data)
         else:
-            logger.info("기본 거래 설정을 사용합니다.")
+            logger.debug("기본 거래 설정을 사용합니다.")
             self.settings = TradingSettings()
 
     def _is_trading_time(self) -> bool:

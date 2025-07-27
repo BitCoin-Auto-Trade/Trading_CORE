@@ -2,7 +2,7 @@
 주문 관련 API 라우터를 정의하는 모듈입니다.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from typing import Optional
 import redis
 
@@ -38,7 +38,12 @@ async def get_active_positions(
     order_service: OrderService = Depends(get_order_service)
 ):
     """활성 포지션 목록을 조회합니다."""
-    return order_service.get_position_summary()
+    summary = order_service.get_position_summary()
+    return create_api_response(
+        success=True,
+        data=summary,
+        message="활성 포지션 조회 완료"
+    )
 
 @router.delete(
     "/positions/{symbol}",

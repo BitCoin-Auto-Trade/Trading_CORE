@@ -9,12 +9,37 @@ import time
 import signal
 import threading
 from concurrent.futures import ThreadPoolExecutor
+import numpy as np
 
 from app.core.constants import API_STATUS, LOG_LEVELS
 from app.core.exceptions import TimeoutException, ValidationException
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
+
+
+def convert_numpy_types(obj):
+    """numpy 타입을 Python 기본 타입으로 변환합니다."""
+    from datetime import datetime
+    
+    if isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif hasattr(np, 'bool_') and isinstance(obj, np.bool_):
+        return bool(obj)
+    elif str(type(obj)).startswith("<class 'numpy.bool"):
+        return bool(obj)
+    elif isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, datetime):
+        return obj.isoformat()
+    elif isinstance(obj, dict):
+        return {key: convert_numpy_types(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [convert_numpy_types(item) for item in obj]
+    else:
+        return obj
 
 
 def create_api_response(
@@ -31,7 +56,7 @@ def create_api_response(
     }
     
     if data is not None:
-        response["data"] = data
+        response["data"] = convert_numpy_types(data)
     
     if error_code:
         response["error_code"] = error_code

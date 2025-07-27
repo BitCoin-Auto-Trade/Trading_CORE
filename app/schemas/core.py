@@ -122,6 +122,38 @@ class TradingSignal(BaseModel):
     confidence_score: float | None = None
     message: str | None = None
     metadata: dict | None = None
+    
+    class Config:
+        json_encoders = {
+            datetime.datetime: lambda v: v.isoformat(),
+        }
+        
+    def dict(self, **kwargs):
+        """dict() 메서드를 오버라이드하여 numpy 타입을 Python 기본 타입으로 변환"""
+        result = super().dict(**kwargs)
+        return self._convert_numpy_types(result)
+    
+    @staticmethod
+    def _convert_numpy_types(obj):
+        """numpy 타입을 Python 기본 타입으로 변환"""
+        import numpy as np
+        
+        if isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif hasattr(np, 'bool_') and isinstance(obj, np.bool_):
+            return bool(obj)
+        elif str(type(obj)).startswith("<class 'numpy.bool"):
+            return bool(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {key: TradingSignal._convert_numpy_types(value) for key, value in obj.items()}
+        elif isinstance(obj, list):
+            return [TradingSignal._convert_numpy_types(item) for item in obj]
+        else:
+            return obj
 
 
 # --- Settings Schemas ---
@@ -130,7 +162,7 @@ class TradingSettings(BaseModel):
     LEVERAGE: int = 10
     RISK_PER_TRADE: float = 0.02
     ACCOUNT_BALANCE: float = 10000.0
-    AUTO_TRADING_ENABLED: bool = True
+    AUTO_TRADING_ENABLED: bool = False  # 기본값을 False로 변경
     ATR_MULTIPLIER: float = 1.5
     TP_RATIO: float = 1.5
     VOLUME_SPIKE_THRESHOLD: float = 2.0

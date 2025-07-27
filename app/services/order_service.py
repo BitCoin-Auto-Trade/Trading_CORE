@@ -104,15 +104,38 @@ class OrderService:
         """Redis에서 거래 설정을 불러오거나, 없으면 기본값을 사용합니다."""
         settings_data = self.redis.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
         if settings_data:
-            logger.info("Redis에서 거래 설정을 불러옵니다.")
+            logger.debug("Redis에서 거래 설정을 불러옵니다.")
             self.settings = TradingSettings.model_validate(settings_data)
         else:
-            logger.info("기본 거래 설정을 사용합니다.")
+            logger.debug("기본 거래 설정을 사용합니다.")
             self.settings = TradingSettings()
 
     def _get_position_key(self, symbol: str) -> str:
         """포지션 키를 생성합니다."""
         return get_redis_key("POSITION", symbol)
+
+    def get_all_positions(self) -> List[PositionData]:
+        """모든 활성 포지션을 조회합니다."""
+        try:
+            positions = []
+            # Redis에서 모든 포지션 키를 찾습니다
+            position_pattern = f"{REDIS_KEYS['POSITION_PREFIX']}*"
+            position_keys = self.redis.keys(position_pattern)
+            
+            for key in position_keys:
+                try:
+                    position_data = self.redis.hgetall(key)
+                    if position_data:
+                        position = PositionData.from_redis(position_data)
+                        positions.append(position)
+                except Exception as e:
+                    logger.warning(f"포지션 데이터 파싱 실패: {key}, 오류: {e}")
+                    continue
+                    
+            return positions
+        except Exception as e:
+            logger.error(f"포지션 조회 중 오류 발생: {e}")
+            return []
 
     @retry_on_failure(max_retries=3, delay=1.0)
     async def process_signal(self, signal: TradingSignal) -> Dict[str, any]:
@@ -185,10 +208,16 @@ class OrderService:
                     tasks = [self._monitor_single_position(key) for key in position_keys]
                     results = await asyncio.gather(*tasks, return_exceptions=True)
                     
-                    # 결과 처리
-                    error_count = sum(1 for res in results if isinstance(res, Exception))
-                    if error_count > 0:
-                        logger.warning(f"포지션 모니터링 중 {error_count}개 오류 발생")
+                    # 결과 처리 및 상세 오류 로깅
+                    errors = [res for res in results if isinstance(res, Exception)]
+                    if errors:
+                        logger.warning(f"포지션 모니터링 중 {len(errors)}개 오류 발생")
+                        for i, error in enumerate(errors):
+                            logger.error(f"포지션 모니터링 오류 {i+1}: {type(error).__name__}: {str(error)}")
+                            # 필요시 스택 트레이스 포함
+                            if hasattr(error, '__traceback__'):
+                                import traceback
+                                logger.debug(f"오류 스택 트레이스: {traceback.format_exception(type(error), error, error.__traceback__)}")
                         
             except Exception as e:
                 logger.error(f"모니터링 루프 오류: {e}")
@@ -202,46 +231,69 @@ class OrderService:
     @timeout(timeout_seconds=30)
     async def _monitor_single_position(self, position_key_raw):
         """개별 포지션을 모니터링하고 리스크를 관리합니다."""
-        position_key = position_key_raw.decode('utf-8') if isinstance(position_key_raw, bytes) else position_key_raw
-        
-        # 포지션 데이터 로드
-        position = self._load_position_from_redis(position_key)
-        if not position:
-            return
-        
-        # 현재 가격 조회
-        current_price = await self.binance_adapter.get_current_price(position.symbol)
-        if not current_price:
-            logger.warning(f"현재 가격 조회 실패", symbol=position.symbol)
-            return
+        try:
+            position_key = position_key_raw.decode('utf-8') if isinstance(position_key_raw, bytes) else position_key_raw
+            
+            # 포지션 데이터 로드
+            position = self._load_position_from_redis(position_key)
+            if not position:
+                logger.debug(f"포지션 데이터 없음: {position_key}")
+                return
+            
+            # Binance API 사용 가능 여부 확인
+            if not self.binance_adapter.is_api_available():
+                logger.debug(f"Binance API 비활성화, 포지션 모니터링 건너뜀: {position.symbol}")
+                return
+            
+            # 현재 가격 조회
+            current_price = await self.binance_adapter.get_current_price(position.symbol)
+            if not current_price:
+                logger.warning(f"현재 가격 조회 실패", symbol=position.symbol)
+                return
 
-        # 종료 조건 확인
-        exit_reason = self._check_exit_conditions(position, current_price)
-        if exit_reason:
-            await self._close_position(position, current_price, exit_reason)
-            return
+            # 종료 조건 확인
+            exit_reason = self._check_exit_conditions(position, current_price)
+            if exit_reason:
+                await self._close_position(position, current_price, exit_reason)
+                return
 
-        # 트레일링 스탑 업데이트
-        await self._update_trailing_stop(position, current_price)
+            # 트레일링 스탑 업데이트
+            await self._update_trailing_stop(position, current_price)
+            
+        except Exception as e:
+            # 개별 포지션 모니터링 오류를 상위로 전파하지 않고 로깅만 수행
+            logger.error(f"포지션 모니터링 개별 오류 ({position_key_raw}): {type(e).__name__}: {str(e)}")
+            raise  # gather에서 exception으로 수집되도록 raise
 
     def _load_position_from_redis(self, position_key: str) -> Optional[PositionData]:
         """Redis에서 포지션 데이터를 로드합니다."""
-        raw_data = self.redis.hgetall(position_key)
-        if not raw_data:
+        try:
+            raw_data = self.redis.hgetall(position_key)
+            if not raw_data:
+                logger.debug(f"Redis에서 포지션 데이터 없음: {position_key}")
+                return None
+            
+            # 데이터 디코딩
+            decoded_data = {
+                k.decode('utf-8') if isinstance(k, bytes) else k: 
+                v.decode('utf-8') if isinstance(v, bytes) else v 
+                for k, v in raw_data.items()
+            }
+            
+            # 심볼 추출
+            symbol_parts = position_key.split(':')
+            if len(symbol_parts) < 2:
+                logger.error(f"잘못된 포지션 키 형식: {position_key}")
+                return None
+                
+            symbol = symbol_parts[1]
+            decoded_data['symbol'] = symbol
+            
+            return PositionData.from_redis(decoded_data)
+            
+        except Exception as e:
+            logger.error(f"포지션 데이터 로드 실패 ({position_key}): {type(e).__name__}: {str(e)}")
             return None
-        
-        # 데이터 디코딩
-        decoded_data = {
-            k.decode('utf-8') if isinstance(k, bytes) else k: 
-            v.decode('utf-8') if isinstance(v, bytes) else v 
-            for k, v in raw_data.items()
-        }
-        
-        # 심볼 추출
-        symbol = position_key.split(':')[1]
-        decoded_data['symbol'] = symbol
-        
-        return PositionData.from_redis(decoded_data)
 
     def _check_exit_conditions(self, pos: PositionData, price: float) -> Optional[str]:
         """다각적 포지션 종료 조건을 확인합니다."""
@@ -254,34 +306,57 @@ class OrderService:
         if datetime.utcnow() - pos.entry_timestamp > self.max_position_hold_time:
             return TRADING["CLOSE_REASONS"]["TIME_LIMIT_EXCEEDED"]
         
-        # 3. 변동성 기반 청산 (구현 예시)
-        # TODO: 실제 변동성 계산 로직 구현
+        # 3. 변동성 기반 청산 - ATR을 활용한 변동성 임계값 체크
+        try:
+            # Redis에서 현재 ATR 값을 가져와서 변동성 기반 청산 조건 체크
+            atr_key = f"{REDIS_KEYS['PRICE_PREFIX']}{pos.symbol}:atr"
+            current_atr = self.redis.get(atr_key)
+            if current_atr:
+                current_atr = float(current_atr)
+                price_change_ratio = abs(price - pos.entry_price) / pos.entry_price
+                # ATR 대비 가격 변동이 너무 클 경우 강제 청산
+                if price_change_ratio > (current_atr * self.volatility_exit_threshold):
+                    return TRADING["CLOSE_REASONS"]["HIGH_VOLATILITY"]
+        except Exception as e:
+            logger.warning(f"변동성 기반 청산 조건 체크 실패: {e}")
         
         return None
 
     async def _close_position(self, pos: PositionData, price: float, reason: str):
         """포지션을 종료합니다."""
-        # TODO: 실제 포지션 종료 주문 실행
-        profit = pos.calculate_profit_loss(price)
-        result = TRADING["RESULTS"]["PROFIT"] if profit >= 0 else TRADING["RESULTS"]["LOSS"]
-        
-        # 성능 업데이트
-        self.signal_service.update_performance(result)
-        
-        # Redis에서 포지션 삭제
-        self.redis.delete(self._get_position_key(pos.symbol))
-        
-        logger.log_position(
-            symbol=pos.symbol,
-            action="CLOSED",
-            details={
-                "reason": reason,
-                "result": result,
-                "profit": profit,
-                "close_price": price,
-                "pnl_percentage": pos.get_unrealized_pnl_percentage(price)
-            }
-        )
+        try:
+            # 실제 거래소에서 포지션 종료 주문 실행
+            order_result = await self.binance_adapter.close_position(
+                symbol=pos.symbol
+            )
+            
+            profit = pos.calculate_profit_loss(price)
+            result = TRADING["RESULTS"]["PROFIT"] if profit >= 0 else TRADING["RESULTS"]["LOSS"]
+            
+            # 성능 업데이트
+            self.signal_service.update_performance(result)
+            
+            # Redis에서 포지션 삭제
+            self.redis.delete(self._get_position_key(pos.symbol))
+            
+            logger.log_position(
+                symbol=pos.symbol,
+                action="CLOSED",
+                details={
+                    "reason": reason,
+                    "result": result,
+                    "profit": profit,
+                    "close_price": price,
+                    "pnl_percentage": pos.get_unrealized_pnl_percentage(price),
+                    "order_id": order_result.get("orderId") if order_result else None
+                }
+            )
+            
+        except Exception as e:
+            logger.error(f"포지션 종료 실패: {pos.symbol} - {str(e)}", exc_info=True)
+            # 포지션은 Redis에서 제거하되 오류 기록
+            self.redis.delete(self._get_position_key(pos.symbol))
+            raise OrderServiceException(f"포지션 종료 실패: {str(e)}")
 
     async def _update_trailing_stop(self, pos: PositionData, price: float):
         """동적 손절 로직을 업데이트합니다."""
