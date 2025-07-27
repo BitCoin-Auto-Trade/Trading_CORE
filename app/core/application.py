@@ -56,7 +56,7 @@ app_state = ApplicationState()
 
 async def initialize_services():
     """서비스 초기화"""
-    logger.info("서비스 초기화 시작...")
+    logger.info("🚀 서비스 초기화 시작")
     
     # DB 세션 생성
     db = SessionLocal()
@@ -92,61 +92,61 @@ async def initialize_services():
     app_state.add_service("signal_service", signal_service)
     app_state.add_service("order_service", order_service)
     
-    logger.info("서비스 초기화 완료")
+    logger.info("✅ 서비스 초기화 완료")
     return signal_service, order_service
 
 
 async def start_background_tasks(signal_service, order_service):
     """백그라운드 태스크 시작"""
-    logger.info("백그라운드 태스크 시작...")
+    logger.info("🔄 백그라운드 태스크 시작")
     
     # 포지션 모니터링 태스크
     monitoring_task = asyncio.create_task(order_service.monitor_positions())
     app_state.add_task("position_monitoring", monitoring_task)
-    logger.info("포지션 모니터링 태스크 시작됨")
+    logger.info("  ✓ 포지션 모니터링 태스크")
     
     # 스케줄러 시작
     start_scheduler(signal_service=signal_service, order_service=order_service)
-    logger.info("신호 분석 스케줄러 시작됨")
+    logger.info("  ✓ 신호 분석 스케줄러")
 
 
 async def cleanup_services():
     """서비스 정리"""
-    logger.info("서비스 정리 시작...")
+    logger.info("🛑 서비스 정리 시작")
     
     # 백그라운드 태스크 정리
     for name, task in app_state.tasks.items():
         if not task.done():
-            logger.info(f"{name} 태스크 취소 중...")
+            logger.info(f"  ⏹️ {name} 태스크 취소 중")
             task.cancel()
             try:
                 await task
             except asyncio.CancelledError:
-                logger.info(f"{name} 태스크 취소 완료")
+                logger.info(f"  ✓ {name} 태스크 취소 완료")
     
     # 스케줄러 정리
     stop_scheduler()
-    logger.info("스케줄러 정리 완료")
+    logger.info("  ✓ 스케줄러 정리 완료")
     
     # DB 세션 정리
     db = app_state.get_service("db")
     if db:
         db.close()
-        logger.info("DB 세션 정리 완료")
+        logger.info("  ✓ DB 세션 정리 완료")
     
-    logger.info("서비스 정리 완료")
+    logger.info("✅ 서비스 정리 완료")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """애플리케이션 생명주기 관리"""
     # === 시작 ===
-    logger.info("애플리케이션 시작 프로세스 개시")
+    logger.info("🏁 Trading CORE 애플리케이션 시작")
     
     try:
         # Redis 연결 확인
         redis_client.ping()
-        logger.info("Redis 연결 확인 완료")
+        logger.info("  ✓ Redis 연결 확인")
         
         # 서비스 초기화
         signal_service, order_service = await initialize_services()
@@ -155,18 +155,18 @@ async def lifespan(app: FastAPI):
         await start_background_tasks(signal_service, order_service)
         
         app_state.is_initialized = True
-        logger.info("애플리케이션 초기화 완료")
+        logger.info("🎉 Trading CORE 애플리케이션 초기화 완료")
         
     except Exception as e:
-        logger.error(f"애플리케이션 초기화 실패: {e}")
+        logger.error(f"❌ 애플리케이션 초기화 실패: {e}")
         raise RuntimeError(f"애플리케이션을 시작할 수 없습니다: {e}")
     
     yield
     
     # === 종료 ===
-    logger.info("애플리케이션 종료 프로세스 시작")
+    logger.info("🏁 Trading CORE 애플리케이션 종료 시작")
     await cleanup_services()
-    logger.info("애플리케이션 종료 완료")
+    logger.info("👋 Trading CORE 애플리케이션 종료 완료")
 
 
 def setup_middleware(app: FastAPI):
@@ -184,13 +184,13 @@ def setup_middleware(app: FastAPI):
     # 에러 핸들링 미들웨어
     app.add_middleware(ErrorHandlingMiddleware)
     
-    # 로깅 미들웨어
-    app.add_middleware(LoggingMiddleware, log_requests=True, log_responses=False)
+    # 로깅 미들웨어 (간소화된 로깅, 에러만 응답 로깅)
+    app.add_middleware(LoggingMiddleware, log_requests=False, log_responses=True)
     
     # 캐싱 미들웨어 (가장 마지막)
     app.add_middleware(ResponseCacheMiddleware)
     
-    logger.info("미들웨어 설정 완료")
+    logger.info("✓ 미들웨어 설정 완료")
 
 
 def setup_routes(app: FastAPI):
@@ -249,15 +249,23 @@ def setup_routes(app: FastAPI):
                 message=f"서비스 상태 확인 실패: {str(e)}"
             )
     
-    logger.info("라우터 설정 완료")
+    logger.info("✓ 라우터 설정 완료")
 
+
+# 애플리케이션 인스턴스 생성 (모듈 레벨에서 한 번만)
+_app_instance = None
 
 def create_application() -> FastAPI:
     """FastAPI 애플리케이션 생성"""
+    global _app_instance
     
-    # 로깅 설정
+    # 이미 생성된 인스턴스가 있으면 반환 (중복 생성 방지)
+    if _app_instance is not None:
+        return _app_instance
+    
+    # 로깅 설정 (중복 방지)
     setup_logging()
-    logger.info("FastAPI 애플리케이션 생성 시작")
+    logger.info("📦 FastAPI 애플리케이션 생성 시작")
     
     # FastAPI 애플리케이션 생성
     app = FastAPI(
@@ -276,7 +284,10 @@ def create_application() -> FastAPI:
     # 라우터 설정
     setup_routes(app)
     
-    logger.info("FastAPI 애플리케이션 생성 완료")
+    logger.info("🚀 FastAPI 애플리케이션 생성 완료")
+    
+    # 전역 인스턴스 저장
+    _app_instance = app
     return app
 
 

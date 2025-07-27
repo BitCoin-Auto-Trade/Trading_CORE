@@ -80,13 +80,18 @@ def get_logger(name: str) -> TradingLogger:
     """로거 인스턴스를 가져옵니다."""
     return logging.getLogger(name)
 
-def setup_logging(level: str = LOG_LEVELS["INFO"]) -> None:
-    """로깅 시스템을 설정합니다."""
+def setup_logging():
+    """로깅 설정을 초기화합니다."""
+    
+    # 이미 설정되었는지 확인 (중복 초기화 방지)
+    if hasattr(setup_logging, '_initialized'):
+        return
+    
     # 루트 로거 설정
     root_logger = logging.getLogger()
-    root_logger.setLevel(level.upper())
+    root_logger.setLevel(logging.INFO)
     
-    # 핸들러 중복 추가 방지
+    # 기존 핸들러 제거 (중복 방지)
     if root_logger.hasHandlers():
         root_logger.handlers.clear()
 
@@ -105,13 +110,20 @@ def setup_logging(level: str = LOG_LEVELS["INFO"]) -> None:
     root_logger.addHandler(file_handler)
     
     # 외부 라이브러리 로거 레벨 조정
-    logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    logging.getLogger("httpx").setLevel(logging.WARNING)
+    logging.getLogger("httpcore").setLevel(logging.WARNING)
+    logging.getLogger("binance").setLevel(logging.WARNING)
+    logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
     logging.getLogger("fastapi").setLevel(logging.WARNING)
-    logging.getLogger("sqlalchemy").setLevel(logging.WARNING)
     logging.getLogger("redis").setLevel(logging.WARNING)
     logging.getLogger("apscheduler").setLevel(logging.WARNING)
     
-    get_logger("app.main").info("로깅 시스템 초기화 완료")
+    # Uvicorn의 access 로그 비활성화 (LoggingMiddleware에서 대신 처리)
+    logging.getLogger("uvicorn.access").setLevel(logging.ERROR)
+    logging.getLogger("uvicorn").setLevel(logging.WARNING)
+    
+    # 설정 완료 마크
+    setup_logging._initialized = True
 
 # 편의를 위한 logger 인스턴스 (기존 코드 호환성)
 logger = get_logger("app.utils.logging")

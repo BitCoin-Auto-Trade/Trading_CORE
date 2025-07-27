@@ -10,6 +10,7 @@
 
 import pandas as pd
 import numpy as np
+import json
 from datetime import datetime, timedelta
 from typing import Dict, Optional, List, Any
 from collections import deque
@@ -64,10 +65,30 @@ class SignalService:
         settings_data = self.redis_client.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
         if settings_data:
             logger.debug("Redis에서 거래 설정을 불러옵니다.")
-            self.settings = TradingSettings.model_validate(settings_data)
+            # Redis에서 가져온 데이터를 적절한 타입으로 파싱
+            parsed_settings = self._parse_redis_settings(settings_data)
+            self.settings = TradingSettings.model_validate(parsed_settings)
         else:
             logger.debug("기본 거래 설정을 사용합니다.")
             self.settings = TradingSettings()
+
+    def _parse_redis_settings(self, redis_data: dict) -> dict:
+        """Redis에서 가져온 설정 데이터를 적절한 타입으로 파싱합니다."""
+        parsed_data = {}
+        for key, value in redis_data.items():
+            # bytes를 문자열로 변환
+            key = key.decode() if isinstance(key, bytes) else key
+            value = value.decode() if isinstance(value, bytes) else value
+            
+            try:
+                # JSON 파싱 시도
+                parsed_value = json.loads(value)
+                parsed_data[key] = parsed_value
+            except (json.JSONDecodeError, TypeError):
+                # JSON이 아닌 경우 원래 값 사용
+                parsed_data[key] = value
+        
+        return parsed_data
 
     def _is_trading_time(self) -> bool:
         """거래 활성 시간인지 확인합니다."""

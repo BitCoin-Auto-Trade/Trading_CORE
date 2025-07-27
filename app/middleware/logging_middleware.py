@@ -23,13 +23,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         """요청/응답을 로깅합니다."""
         start_time = time.time()
         
-        # 요청 로깅
+        # 요청 로깅 (간소화 - Uvicorn access 로그와 중복 방지)
         if self.log_requests:
             client_ip = self._get_client_ip(request)
             logger.info(
-                f"Request - {request.method} {request.url} | "
-                f"Client: {client_ip} | "
-                f"User-Agent: {request.headers.get('user-agent', 'Unknown')}"
+                f"[API] {request.method} {request.url.path} | IP: {client_ip}"
             )
         
         # 요청 처리
@@ -38,12 +36,11 @@ class LoggingMiddleware(BaseHTTPMiddleware):
         # 응답 시간 계산
         process_time = time.time() - start_time
         
-        # 응답 로깅
+        # 응답 로깅 (에러인 경우만 또는 설정된 경우)
         if self.log_responses or response.status_code >= 400:
             log_level = "ERROR" if response.status_code >= 400 else "INFO"
             message = (
-                f"Response - {request.method} {request.url} | "
-                f"Status: {response.status_code} | "
+                f"[API] {response.status_code} {request.method} {request.url.path} | "
                 f"Time: {process_time:.3f}s"
             )
             

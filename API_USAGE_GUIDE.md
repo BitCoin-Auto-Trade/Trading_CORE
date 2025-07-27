@@ -1,23 +1,34 @@
 # Trading CORE API 사용 가이드 📊
 
-## 🚀 시스템 현재 상태 
-- **보안 시스템**: 완전 제거됨 (JWT, Rate Limiting, CORS 등)
-- **인증**: 없음 - 모든 API 자유롭게 호출 가능
-- **캐싱**: Redis 기반 응답 캐싱 (5-60초 TTL)
+## 🚀 시스템 현재 상태 (최신 업데이트: 2025년 7월 28일)
+- **아키텍처**: FastAPI 완전 리팩토링 완료 ✨
+- **미들웨어 시스템**: 계층화된 미들웨어 (에러 핸들링, 로깅, 캐싱, CORS)
+- **캐싱**: Redis 기반 응답 캐싱 (엔드포인트별 최적화된 TTL)
+  - K-라인: 5초, 거래내역: 10초, 포지션: 30초, 계정정보: 60초
+- **성능**: 캐시 HIT 시 밀리초 단위 응답 (X-Cache 헤더로 확인 가능)
+- **에러 처리**: 전역 에러 핸들링으로 안정성 강화
+- **로깅**: 요청/응답 자동 로깅 + 성능 측정 (X-Process-Time 헤더)
+- **자동거래**: 기본값 OFF (안전을 위한 설정)
 - **데이터 소스**: 
   - Redis (실시간 1분봉 최신 1개)
   - PostgreSQL (과거 데이터 + 기술적 지표)
-  - Binance API (실시간 연동)
+  - Binance API (실시간 연동 + 폴백 메커니즘)
 - **신호 생성**: 정상 작동 중 (다중 시간대 분석)
-- **포지션 모니터링**: 백그라운드 실행 중
+- **포지션 모니터링**: 백그라운드 실행 중 (에러 핸들링 강화)
 - **스케줄러**: 자동 신호 생성 활성화됨
 
 ## 기본 정보
 - **Base URL**: `http://localhost:8000`
 - **응답 형식**: JSON
-- **인증**: 없음 (보안 시스템 제거됨)
+- **인증**: 없음 (개발 환경)
 - **Content-Type**: `application/json`
-- **마지막 업데이트**: 2025년 7월 27일
+- **CORS**: 모든 오리진 허용 (개발 환경)
+- **마지막 업데이트**: 2025년 7월 28일
+
+## 📊 성능 모니터링 헤더
+모든 응답에 다음 헤더가 포함됩니다:
+- `X-Process-Time`: 요청 처리 시간 (초)
+- `X-Cache`: 캐시 상태 (HIT/MISS)
 
 ## 공통 응답 형식
 모든 API는 다음과 같은 형식으로 응답합니다:
@@ -25,16 +36,16 @@
 {
   "success": true,
   "message": "응답 메시지",
-  "timestamp": "2025-07-27T22:00:00.000000",
+  "timestamp": "2025-07-28T01:00:00.000000",
   "data": {}
 }
 ```
 
 ---
 
-## 1. 기본 시스템 API
+## ⚡ 1. 기본 시스템 API
 
-### 시스템 상태 확인
+### 시스템 상태 확인 (강화됨!)
 ```javascript
 // 전체 시스템 헬스체크
 fetch('http://localhost:8000/health')
@@ -48,27 +59,48 @@ fetch('http://localhost:8000/health')
   "data": {
     "status": "healthy",
     "redis": "connected",
+    "database": "connected",
+    "services": "initialized"  // 새로 추가!
+  }
+}
     "database": "connected"
   }
 }
 ```
 
-### API 루트 정보
+### API 루트 정보 (업데이트됨!)
 ```javascript
 fetch('http://localhost:8000/')
   .then(response => response.json())
   .then(data => console.log(data));
+
+// 응답 예시:
+{
+  "success": true,
+  "message": "Trading CORE API가 정상적으로 작동 중입니다.",
+  "data": {
+    "name": "Trading CORE API",
+    "version": "1.0.0",
+    "status": "healthy"  // 애플리케이션 상태 표시
+  }
+}
 ```
 
 ---
 
-## 2. 데이터 조회 API (`/api/v1/data`)
+## ⚡ 2. 데이터 조회 API (`/api/v1/data`) - 캐싱 최적화!
 
-### 실시간 K-라인 데이터 (개선됨! 🎉)
+### 실시간 K-라인 데이터 (성능 개선!)
+> **💡 캐시 정보**: 5초 TTL - 동일 요청 시 즉시 응답!
+
 ```javascript
 // 실시간 최신 1개 데이터 (Redis에서 실시간 데이터)
 fetch('http://localhost:8000/api/v1/data/realtime/klines?symbol=BTCUSDT&interval=1m&limit=1')
-  .then(response => response.json())
+  .then(response => {
+    console.log('캐시 상태:', response.headers.get('X-Cache')); // HIT/MISS
+    console.log('처리 시간:', response.headers.get('X-Process-Time')); // 처리 시간
+    return response.json();
+  })
   .then(data => {
     console.log('실시간 데이터:', data.data[0]);
     // 출력 예시: {"t":1753623360000,"T":1753623419999,"s":"BTCUSDT","o":"118114.80","c":"118114.80","h":"118114.80","l":"118114.70","v":"12.262","x":true}
@@ -88,11 +120,16 @@ fetch('http://localhost:8000/api/v1/data/realtime/klines?symbol=ETHUSDT&interval
   .then(data => console.log('5분 차트:', data.data));
 ```
 
-### 실시간 거래 데이터
+### 실시간 거래 데이터 (캐싱 적용!)
+> **💡 캐시 정보**: 10초 TTL
+
 ```javascript
 // 최근 거래 내역
 fetch('http://localhost:8000/api/v1/data/realtime/trades?symbol=BTCUSDT&limit=50')
-  .then(response => response.json())
+  .then(response => {
+    console.log('캐시:', response.headers.get('X-Cache'));
+    return response.json();
+  })
   .then(data => console.log(data));
 ```
 
@@ -196,12 +233,18 @@ fetch('http://localhost:8000/api/v1/signals/history?limit=50')
 
 ---
 
-## 4. 주문/포지션 관리 API (`/api/v1/orders`)
+## ⚡ 4. 주문/포지션 관리 API (`/api/v1/orders`) - 캐싱 적용!
 
-### 현재 포지션 조회
+### 현재 포지션 조회 (성능 향상!)
+> **💡 캐시 정보**: 30초 TTL - 포지션 정보 빠른 조회!
+
 ```javascript
 fetch('http://localhost:8000/api/v1/orders/positions')
-  .then(response => response.json())
+  .then(response => {
+    console.log('캐시 상태:', response.headers.get('X-Cache'));
+    console.log('처리 시간:', response.headers.get('X-Process-Time'));
+    return response.json();
+  })
   .then(data => {
     const positions = data.data.data.positions;
     positions.forEach(pos => {
@@ -210,24 +253,34 @@ fetch('http://localhost:8000/api/v1/orders/positions')
   });
 ```
 
-### 계정 정보 조회
+### 계정 정보 조회 (최적화!)
+> **💡 캐시 정보**: 60초 TTL - 계정 정보 효율적 조회!
 ```javascript
 // 선물 계정
 fetch('http://localhost:8000/api/v1/orders/account/futures')
-  .then(response => response.json())
+  .then(response => {
+    console.log('캐시 상태:', response.headers.get('X-Cache'));
+    return response.json();
+  })
   .then(data => console.log(data));
 
 // 현물 계정
 fetch('http://localhost:8000/api/v1/orders/account/spot')
+  .then(response => response.json())
+  .then(data => console.log(data));
 ```
 
 ### 오픈 주문 조회
 ```javascript
 // 모든 오픈 주문
 fetch('http://localhost:8000/api/v1/orders/open')
+  .then(response => response.json())
+  .then(data => console.log(data));
 
 // 특정 심볼의 오픈 주문
 fetch('http://localhost:8000/api/v1/orders/open?symbol=BTCUSDT')
+  .then(response => response.json())
+  .then(data => console.log(data));
 ```
 
 ### 포지션 강제 종료
@@ -243,9 +296,11 @@ fetch('http://localhost:8000/api/v1/orders/positions/BTCUSDT', {
 fetch('http://localhost:8000/api/v1/orders/positions/all', {
   method: 'DELETE'
 })
+.then(response => response.json())
+.then(data => console.log(data));
 ```
 
-### 신호 처리 (POST)
+### 신호 처리 (POST) - 에러 핸들링 강화!
 ```javascript
 const signal = {
   symbol: "BTCUSDT",
@@ -280,21 +335,35 @@ fetch('http://localhost:8000/api/v1/orders/auto-trading/status')
 
 ---
 
-## 5. 거래 설정 API (`/api/v1/settings`)
+## 5. 거래 설정 API (`/api/v1/settings`) - 완전한 CRUD 지원! 🆕
 
-### 현재 설정 조회
+### 현재 설정 조회 (GET)
 ```javascript
 fetch('http://localhost:8000/api/v1/settings/trading')
   .then(response => response.json())
   .then(data => {
-    const settings = data;
+    const settings = data.data;
     console.log(`레버리지: ${settings.LEVERAGE}x`);
     console.log(`리스크: ${settings.RISK_PER_TRADE * 100}%`);
     console.log(`자동거래: ${settings.AUTO_TRADING_ENABLED}`);
   });
+
+// 응답 예시:
+{
+  "success": true,
+  "message": "거래 설정을 성공적으로 조회했습니다.",
+  "data": {
+    "LEVERAGE": 10,
+    "RISK_PER_TRADE": 0.02,
+    "AUTO_TRADING_ENABLED": false,
+    "TIMEFRAME": "1m",
+    "ACCOUNT_BALANCE": 10000.0,
+    // ... 다른 설정들
+  }
+}
 ```
 
-### 설정 업데이트 (POST)
+### 전체 설정 업데이트 (POST)
 ```javascript
 const newSettings = {
   TIMEFRAME: "5m",
@@ -319,7 +388,264 @@ fetch('http://localhost:8000/api/v1/settings/trading', {
   body: JSON.stringify(newSettings)
 })
 .then(response => response.json())
-.then(data => console.log(data));
+.then(data => {
+  console.log('설정 업데이트 완료:', data.data);
+});
+```
+
+### 🆕 개별 설정 업데이트 (PATCH)
+```javascript
+// 레버리지만 변경
+fetch('http://localhost:8000/api/v1/settings/trading/LEVERAGE', {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    "value": 25
+  })
+})
+.then(response => response.json())
+.then(data => {
+  console.log('이전 값:', data.data.old_value);
+  console.log('새 값:', data.data.new_value);
+  console.log('전체 설정:', data.data.updated_settings);
+});
+
+// 자동거래 토글
+fetch('http://localhost:8000/api/v1/settings/trading/AUTO_TRADING_ENABLED', {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    "value": true
+  })
+})
+.then(response => response.json())
+.then(data => console.log('자동거래 활성화:', data));
+
+// 리스크 비율 조정
+fetch('http://localhost:8000/api/v1/settings/trading/RISK_PER_TRADE', {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    "value": 0.015
+  })
+})
+.then(response => response.json())
+.then(data => console.log('리스크 조정:', data));
+
+// 활성 시간 설정
+fetch('http://localhost:8000/api/v1/settings/trading/ACTIVE_HOURS', {
+  method: 'PATCH',
+  headers: {
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    "value": [[8, 23], [0, 3]]
+  })
+})
+.then(response => response.json())
+.then(data => console.log('활성 시간 변경:', data));
+```
+
+### 🆕 설정 초기화 (POST)
+```javascript
+// 모든 설정을 기본값으로 초기화
+fetch('http://localhost:8000/api/v1/settings/trading/reset', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json'
+  }
+})
+.then(response => response.json())
+.then(data => {
+  console.log('이전 설정:', data.data.previous_settings);
+  console.log('새 설정:', data.data.new_settings);
+  console.log('초기화 완료 시간:', data.data.reset_timestamp);
+});
+
+// 응답 예시:
+{
+  "success": true,
+  "message": "거래 설정이 기본값으로 성공적으로 초기화되었습니다.",
+  "data": {
+    "previous_settings": {
+      "LEVERAGE": 25,
+      "AUTO_TRADING_ENABLED": true,
+      // ... 이전 설정들
+    },
+    "new_settings": {
+      "LEVERAGE": 10,
+      "AUTO_TRADING_ENABLED": false,
+      // ... 기본 설정들
+    },
+    "reset_timestamp": "2025-07-28T02:30:00.000000"
+  }
+}
+```
+
+### 🔧 실용적인 사용 예시
+
+#### React Hook으로 설정 관리
+```jsx
+import { useState, useEffect } from 'react';
+
+function useTraidngSettings() {
+  const [settings, setSettings] = useState(null);
+  const [loading, setLoading] = useState(false);
+
+  // 설정 로드
+  const loadSettings = async () => {
+    setLoading(true);
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/settings/trading');
+      const data = await response.json();
+      if (data.success) {
+        setSettings(data.data);
+      }
+    } catch (error) {
+      console.error('설정 로드 실패:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 개별 설정 업데이트
+  const updateSetting = async (key, value) => {
+    try {
+      const response = await fetch(`http://localhost:8000/api/v1/settings/trading/${key}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ value })
+      });
+      const data = await response.json();
+      if (data.success) {
+        setSettings(data.data.updated_settings);
+        return true;
+      }
+    } catch (error) {
+      console.error('설정 업데이트 실패:', error);
+      return false;
+    }
+  };
+
+  // 설정 초기화
+  const resetSettings = async () => {
+    try {
+      const response = await fetch('http://localhost:8000/api/v1/settings/trading/reset', {
+        method: 'POST'
+      });
+      const data = await response.json();
+      if (data.success) {
+        setSettings(data.data.new_settings);
+        return true;
+      }
+    } catch (error) {
+      console.error('설정 초기화 실패:', error);
+      return false;
+    }
+  };
+
+  useEffect(() => {
+    loadSettings();
+  }, []);
+
+  return {
+    settings,
+    loading,
+    updateSetting,
+    resetSettings,
+    reload: loadSettings
+  };
+}
+
+// 컴포넌트에서 사용
+function SettingsPanel() {
+  const { settings, updateSetting, resetSettings } = useTraidngSettings();
+
+  const handleLeverageChange = (newLeverage) => {
+    updateSetting('LEVERAGE', parseInt(newLeverage));
+  };
+
+  const toggleAutoTrading = () => {
+    updateSetting('AUTO_TRADING_ENABLED', !settings.AUTO_TRADING_ENABLED);
+  };
+
+  return (
+    <div>
+      <h2>거래 설정</h2>
+      
+      <div>
+        <label>레버리지: </label>
+        <input 
+          type="number" 
+          value={settings?.LEVERAGE || 10}
+          onChange={(e) => handleLeverageChange(e.target.value)}
+        />
+      </div>
+      
+      <div>
+        <label>
+          <input 
+            type="checkbox" 
+            checked={settings?.AUTO_TRADING_ENABLED || false}
+            onChange={toggleAutoTrading}
+          />
+          자동거래 활성화
+        </label>
+      </div>
+      
+      <button onClick={resetSettings}>
+        기본값으로 초기화
+      </button>
+    </div>
+  );
+}
+```
+
+#### 설정 검증 유틸리티
+```javascript
+// 설정 유효성 검사 함수
+function validateSettingValue(key, value) {
+  const validations = {
+    LEVERAGE: (v) => v >= 1 && v <= 125,
+    RISK_PER_TRADE: (v) => v > 0 && v <= 1,
+    ACCOUNT_BALANCE: (v) => v > 0,
+    ATR_MULTIPLIER: (v) => v > 0,
+    TP_RATIO: (v) => v > 0,
+    MIN_SIGNAL_INTERVAL_MINUTES: (v) => v >= 1,
+    MAX_CONSECUTIVE_LOSSES: (v) => v >= 1,
+  };
+
+  if (validations[key]) {
+    return validations[key](value);
+  }
+  return true;
+}
+
+// 안전한 설정 업데이트
+async function safeUpdateSetting(key, value) {
+  if (!validateSettingValue(key, value)) {
+    throw new Error(`Invalid value for ${key}: ${value}`);
+  }
+
+  const response = await fetch(`http://localhost:8000/api/v1/settings/trading/${key}`, {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ value })
+  });
+
+  const data = await response.json();
+  if (!data.success) {
+    throw new Error(data.message);
+  }
+
+  return data.data;
+}
 ```
 
 ---
@@ -524,7 +850,7 @@ API 요청 실패 시 공통 에러 응답:
 }
 ```
 
-### JavaScript 에러 처리 예시
+### JavaScript 에러 처리 예시 (강화된 버전!)
 ```javascript
 async function apiCall(url, options = {}) {
   try {
@@ -535,6 +861,10 @@ async function apiCall(url, options = {}) {
       },
       ...options
     });
+    
+    // 성능 정보 출력
+    console.log(`⚡ 처리 시간: ${response.headers.get('X-Process-Time')}초`);
+    console.log(`💾 캐시 상태: ${response.headers.get('X-Cache') || 'NONE'}`);
     
     const data = await response.json();
     
@@ -558,15 +888,45 @@ try {
 }
 ```
 
-이 가이드를 참고하여 프론트엔드에서 Trading CORE API를 효율적으로 활용하실 수 있습니다.
-
 ---
 
-## 📈 최신 개선사항 (2025년 7월 28일)
+## � 최신 개선사항 (2025년 7월 28일) - FastAPI 리팩토링 완료!
 
-1. **응답 캐싱 구현**: Redis 기반 자동 캐싱으로 반복 요청 최적화
-   - 실시간 K-라인: 10초 캐싱
-   - 거래 데이터: 5초 캐싱  
+### 📈 성능 최적화
+1. **응답 캐싱 시스템**: Redis 기반 지능형 캐싱
+   - K-라인 데이터: 5초 TTL (빠른 차트 업데이트)
+   - 거래 데이터: 10초 TTL (실시간성 유지)
+   - 포지션 정보: 30초 TTL (안정적 조회)
+   - 계정 정보: 60초 TTL (효율적 관리)
+
+2. **성능 모니터링**: 모든 응답에 성능 헤더 제공
+   - `X-Process-Time`: 실제 처리 시간 측정
+   - `X-Cache`: 캐시 히트/미스 상태 표시
+
+### 🛡️ 안정성 강화
+1. **에러 핸들링 미들웨어**: 전역 예외 처리
+   - 비즈니스 로직 예외 (400)
+   - 유효성 검사 오류 (422) 
+   - 서버 내부 오류 (500)
+
+2. **포지션 모니터링**: 백그라운드 에러 핸들링 강화
+   - 상세한 스택 트레이스 로깅
+   - 안전한 데이터 로딩 메커니즘
+
+### ⚙️ 아키텍처 개선
+1. **애플리케이션 팩토리 패턴**: 깔끔한 코드 구조
+2. **계층화된 미들웨어**: CORS → 에러 → 로깅 → 캐시 순서
+3. **개선된 의존성 주입**: 효율적인 서비스 관리
+4. **설정 관리 개선**: 환경별 설정 분리
+
+### 🔧 개발자 경험 개선
+1. **자동 CORS 설정**: 프론트엔드 개발 편의성
+2. **상세한 로깅**: 요청/응답 자동 추적
+3. **헬스체크 강화**: 서비스 상태 실시간 모니터링
+
+이 가이드를 참고하여 프론트엔드에서 Trading CORE API를 효율적으로 활용하실 수 있습니다.
+
+**프론트엔드에서 빠른 요청이 가능한 이유**: Redis 캐시 + 최적화된 미들웨어 파이프라인 덕분입니다! 🚀  
    - 포지션 정보: 15초 캐싱
    - 계정 정보: 30초 캐싱
 
