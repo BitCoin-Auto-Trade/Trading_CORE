@@ -1,7 +1,6 @@
 """
 거래 설정 관리 API 라우터 - 완전한 CRUD 지원
 """
-import json
 from datetime import datetime
 from typing import Dict, Any
 from fastapi import APIRouter, HTTPException, Path
@@ -12,6 +11,7 @@ from app.core.dependencies import RedisClient
 from app.schemas.core import TradingSettings
 from app.utils.helpers import create_api_response
 from app.utils.logging import get_logger
+from app.utils.redis_settings import parse_redis_settings, settings_to_redis_dict
 from app.core.constants import REDIS_KEYS
 
 router = APIRouter()
@@ -39,14 +39,7 @@ def get_trading_settings(redis_client: RedisClient):
             )
         
         # Redis에서 가져온 값들을 올바른 타입으로 변환
-        parsed_settings = {}
-        for key, value in settings_data.items():
-            try:
-                # JSON으로 파싱 시도 (bool, list, dict 등)
-                parsed_settings[key] = json.loads(value)
-            except (json.JSONDecodeError, TypeError):
-                # JSON이 아닌 경우 문자열 그대로 사용
-                parsed_settings[key] = value
+        parsed_settings = parse_redis_settings(settings_data)
         
         # Pydantic 모델로 변환하여 타입 검증
         typed_settings = TradingSettings.model_validate(parsed_settings)
@@ -74,12 +67,7 @@ def update_trading_settings(
         settings_dict = settings.model_dump()
         
         # Redis는 문자열만 저장하므로 복잡한 타입은 JSON으로 변환
-        redis_dict = {}
-        for key, value in settings_dict.items():
-            if isinstance(value, (bool, list, dict)):
-                redis_dict[key] = json.dumps(value)
-            else:
-                redis_dict[key] = str(value)
+        redis_dict = settings_to_redis_dict(settings_dict)
         
         redis_client.hset(SETTINGS_KEY, mapping=redis_dict)
         
@@ -115,14 +103,7 @@ def update_single_setting(
             current_settings_data = current_settings.model_dump()
         else:
             # Redis에서 가져온 데이터를 올바른 타입으로 파싱
-            parsed_settings = {}
-            for key, value in current_settings_data.items():
-                try:
-                    # JSON으로 파싱 시도 (bool, list, dict 등)
-                    parsed_settings[key] = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    # JSON이 아닌 경우 문자열 그대로 사용
-                    parsed_settings[key] = value
+            parsed_settings = parse_redis_settings(current_settings_data)
             
             current_settings = TradingSettings.model_validate(parsed_settings)
             current_settings_data = current_settings.model_dump()
@@ -173,10 +154,8 @@ def update_single_setting(
             )
         
         # Redis에 저장 (Redis는 문자열만 저장하므로 JSON 문자열로 변환)
-        if isinstance(new_value, (bool, list, dict)):
-            redis_value = json.dumps(new_value)
-        else:
-            redis_value = str(new_value)
+        redis_dict = settings_to_redis_dict({key: new_value})
+        redis_value = redis_dict[key]
         
         redis_client.hset(SETTINGS_KEY, key, redis_value)
         
@@ -210,15 +189,7 @@ def reset_trading_settings(redis_client: RedisClient):
         # 현재 설정 백업
         current_settings_data = redis_client.hgetall(SETTINGS_KEY)
         if current_settings_data:
-            # Redis에서 가져온 데이터를 올바른 타입으로 파싱
-            parsed_settings = {}
-            for key, value in current_settings_data.items():
-                try:
-                    # JSON으로 파싱 시도 (bool, list, dict 등)
-                    parsed_settings[key] = json.loads(value)
-                except (json.JSONDecodeError, TypeError):
-                    # JSON이 아닌 경우 문자열 그대로 사용
-                    parsed_settings[key] = value
+            parsed_settings = parse_redis_settings(current_settings_data)
             
             current_settings = TradingSettings.model_validate(parsed_settings)
             previous_settings = current_settings.model_dump()
@@ -230,12 +201,7 @@ def reset_trading_settings(redis_client: RedisClient):
         default_settings_dict = default_settings.model_dump()
         
         # Redis에 기본 설정 저장 (문자열로 변환)
-        redis_dict = {}
-        for key, value in default_settings_dict.items():
-            if isinstance(value, (bool, list, dict)):
-                redis_dict[key] = json.dumps(value)
-            else:
-                redis_dict[key] = str(value)
+        redis_dict = settings_to_redis_dict(default_settings_dict)
         
         redis_client.hset(SETTINGS_KEY, mapping=redis_dict)
         

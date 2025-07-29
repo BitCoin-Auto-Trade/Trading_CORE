@@ -29,6 +29,7 @@ from app.utils.helpers import (
     retry_on_failure,
     timeout
 )
+from app.utils.redis_settings import parse_redis_settings
 from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -107,29 +108,11 @@ class OrderService:
         if settings_data:
             logger.debug("Redis에서 거래 설정을 불러옵니다.")
             # Redis에서 가져온 데이터를 적절한 타입으로 파싱
-            parsed_settings = self._parse_redis_settings(settings_data)
+            parsed_settings = parse_redis_settings(settings_data)
             self.settings = TradingSettings.model_validate(parsed_settings)
         else:
             logger.debug("기본 거래 설정을 사용합니다.")
             self.settings = TradingSettings()
-
-    def _parse_redis_settings(self, redis_data: dict) -> dict:
-        """Redis에서 가져온 설정 데이터를 적절한 타입으로 파싱합니다."""
-        parsed_data = {}
-        for key, value in redis_data.items():
-            # bytes를 문자열로 변환
-            key = key.decode() if isinstance(key, bytes) else key
-            value = value.decode() if isinstance(value, bytes) else value
-            
-            try:
-                # JSON 파싱 시도
-                parsed_value = json.loads(value)
-                parsed_data[key] = parsed_value
-            except (json.JSONDecodeError, TypeError):
-                # JSON이 아닌 경우 원래 값 사용
-                parsed_data[key] = value
-        
-        return parsed_data
 
     def _get_position_key(self, symbol: str) -> str:
         """포지션 키를 생성합니다."""

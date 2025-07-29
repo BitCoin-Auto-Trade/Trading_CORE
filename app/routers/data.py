@@ -8,7 +8,7 @@ from typing import Optional
 from app.repository.db_repository import DBRepository
 from app.adapters.binance_adapter import BinanceAdapter
 from app.utils.helpers import create_api_response
-from app.dependencies import get_binance_adapter, get_db_repository
+from app.core.dependencies import BinanceAdapterDep, DbRepository
 
 router = APIRouter()
 
@@ -20,11 +20,11 @@ router = APIRouter()
     description="실시간 K-라인 데이터를 조회합니다. (프론트엔드 호환성)"
 )
 def get_realtime_klines(
+    binance_adapter: BinanceAdapterDep,
+    db_repository: DbRepository,
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     interval: str = Query("1m", description="시간 간격 (예: 1m, 5m, 1h)"),
-    limit: int = Query(1, description="조회할 캔들 개수"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter),
-    db_repository: DBRepository = Depends(get_db_repository)
+    limit: int = Query(1, description="조회할 캔들 개수")
 ):
     """실시간 K-라인 데이터를 조회합니다."""
     if interval == "1m":
@@ -88,7 +88,7 @@ def get_realtime_klines(
 def get_realtime_trades(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(50, description="조회할 거래 개수"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter)
+    binance_adapter: BinanceAdapter : BinanceAdapterDep
 ):
     """실시간 거래 데이터를 조회합니다."""
     trades = binance_adapter.get_trades(symbol.upper(), limit)
@@ -106,7 +106,7 @@ def get_realtime_trades(
 def get_realtime_order_book(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(20, description="조회할 호가 개수"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter)
+    binance_adapter: BinanceAdapter : BinanceAdapterDep
 ):
     """실시간 오더북 데이터를 조회합니다."""
     order_book = binance_adapter.get_order_book(symbol.upper())
@@ -126,7 +126,7 @@ def get_realtime_order_book(
 def get_klines_data(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(100, description="조회할 캔들 개수"),
-    db_repository: DBRepository = Depends(get_db_repository)
+    db_repository: DBRepository : DbRepository
 ):
     """데이터베이스에서 K-라인 데이터를 조회합니다."""
     df = db_repository.get_klines_by_symbol_as_df(symbol.upper(), limit)
@@ -177,7 +177,7 @@ def get_klines_data(
 def get_historical_trades(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(100, description="조회할 거래 개수"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter)
+    binance_adapter: BinanceAdapter : BinanceAdapterDep
 ):
     """데이터베이스에서 과거 거래 데이터를 조회합니다."""
     # 실제 구현 시 데이터베이스에서 조회해야 함
@@ -197,7 +197,7 @@ def get_historical_trades(
 def get_historical_funding_rates(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(100, description="조회할 데이터 개수"),
-    db_repository: DBRepository = Depends(get_db_repository)
+    db_repository: DBRepository : DbRepository
 ):
     """데이터베이스에서 펀딩비 데이터를 조회합니다."""
     funding_rates = db_repository.get_funding_rates_by_symbol(symbol.upper(), limit)
@@ -224,7 +224,7 @@ def get_historical_funding_rates(
 def get_historical_open_interest(
     symbol: str = Query(..., description="거래 심볼 (예: BTCUSDT)"),
     limit: int = Query(100, description="조회할 데이터 개수"),
-    db_repository: DBRepository = Depends(get_db_repository)
+    db_repository: DBRepository : DbRepository
 ):
     """데이터베이스에서 미결제 약정 데이터를 조회합니다."""
     open_interests = db_repository.get_open_interest_by_symbol(symbol.upper(), limit)
@@ -250,7 +250,7 @@ def get_historical_open_interest(
 )
 def get_market_info(
     symbol: Optional[str] = Query(None, description="거래 심볼 (옵션)"),
-    binance_adapter: BinanceAdapter = Depends(get_binance_adapter)
+    binance_adapter: BinanceAdapter : BinanceAdapterDep
 ):
     """시장 정보 및 통계를 조회합니다."""
     if symbol:

@@ -9,7 +9,7 @@ import json
 
 from app.services.signal_service import SignalService
 from app.utils.helpers import create_api_response
-from app.dependencies import get_signal_service
+from app.core.dependencies import SignalServiceDep
 
 router = APIRouter()
 
@@ -35,7 +35,7 @@ def health_check():
 )
 def get_latest_signal(
     symbol: Optional[str] = None,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """최신 신호를 조회합니다."""
     if symbol:
@@ -61,7 +61,7 @@ def get_latest_signal(
 )
 def get_combined_signal(
     symbol: str,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """통합 신호를 조회합니다."""
     signal = signal_service.get_combined_trading_signal(symbol.upper())
@@ -84,7 +84,7 @@ def get_combined_signal(
 )
 def generate_signal(
     symbol: str,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """새로운 신호를 생성합니다."""
     signal = signal_service.get_combined_trading_signal(symbol.upper())
@@ -107,7 +107,7 @@ def generate_signal(
 )
 def get_cached_signals(
     symbol: Optional[str] = None,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """캐시된 신호들을 조회합니다."""
     # 현재 구현에서는 Redis 캐시된 신호 대신 최신 신호 반환
@@ -135,7 +135,7 @@ def get_cached_signals(
 def get_signal_performance(
     symbol: Optional[str] = None,
     days: int = 30,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """신호 성과를 분석합니다."""
     performance = signal_service.get_performance_stats()
@@ -153,7 +153,7 @@ def get_signal_performance(
 def get_signal_history(
     symbol: Optional[str] = None,
     limit: int = 100,
-    signal_service: SignalService = Depends(get_signal_service)
+    signal_service: SignalService : SignalServiceDep
 ):
     """신호 기록을 조회합니다."""
     # 현재 구현에서는 signal_history deque에서 최근 기록 반환
