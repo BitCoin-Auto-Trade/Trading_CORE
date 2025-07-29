@@ -1,11 +1,13 @@
 """
-매매 신호 관련 비즈니스 로직을 처리하는 고도화된 서비스입니다.
+트레이딩 신호 분석 및 생성 서비스
 
-주요 특징:
-- **다중 타임프레임 분석(MTA)**: 장기(15m) 및 단기(1m) 추세를 함께 분석하여 신호의 신뢰도를 높입니다.
-- **동적 가중치 및 임계값**: 시장 상황(추세, 변동성)에 따라 지표의 가중치와 RSI 임계값을 동적으로 조절합니다.
-- **안정성 강화**: 잠재적 오류(IndexError, 메모리 누수)를 방지하는 로직이 포함되어 있습니다.
-- **상황인지형 로직**: 시장 상황에 맞춰 신호 발생 기준과 리스크를 동적으로 조절합니다.
+이 모듈은 다중 타임프레임 분석을 통해 신뢰성 높은 매매 신호를 생성합니다.
+
+주요 기능:
+- 다중 타임프레임 분석(Multi-Timeframe Analysis): 15분과 1분 차트를 동시 분석
+- 동적 지표 가중치 조절: 시장 상황에 따른 적응형 신호 생성
+- 리스크 관리: 연속 손실 및 신호 간격 제어
+- 성능 추적: 신호 정확도 및 수익률 모니터링
 """
 
 import pandas as pd
@@ -26,9 +28,11 @@ import redis
 
 logger = get_logger(__name__)
 
-class SignalService:
-    """
-    다중 타임프레임 분석, 동적 가중치 및 임계값을 적용하여 고도화된 매매 신호를 생성하는 서비스.
+class TradingSignalAnalyzer:
+    """트레이딩 신호 분석기
+    
+    다중 타임프레임 분석과 동적 가중치를 활용하여
+    신뢰성 높은 매매 신호를 생성하는 핵심 서비스입니다.
     """
 
     def __init__(
@@ -37,158 +41,222 @@ class SignalService:
         binance_adapter: BinanceAdapter,
         redis_client: redis.Redis
     ):
-        # 의존성 주입
+        """신호 분석기 초기화
+        
+        Args:
+            db_repository: 데이터베이스 저장소
+            binance_adapter: 바이낸스 API 어댑터  
+            redis_client: Redis 캐시 클라이언트
+        """
+        # 핵심 의존성 주입
         self.db_repository = db_repository
         self.binance_adapter = binance_adapter
         self.redis_client = redis_client
 
-        # 동적 거래 설정 로드
-        self._load_settings()
+        # 거래 설정 초기화
+        self._initialize_trading_settings()
 
-        # --- 리스크 관리 ---
-        self.last_signal_time: Dict[str, datetime] = {}
-        self.signal_cooldown = timedelta(minutes=self.settings.MIN_SIGNAL_INTERVAL_MINUTES)
+        # 리스크 관리 매개변수
+        self.last_signal_timestamps: Dict[str, datetime] = {}
+        self.signal_cooldown_period = timedelta(minutes=self.settings.MIN_SIGNAL_INTERVAL_MINUTES)
 
-        # --- 성능 추적 ---
-        self.performance_stats = {
-            "total_signals": 0,
-            "successful_signals": 0,
-            "failed_signals": 0,
-            "win_rate": 0.0
+        # 성능 추적 지표
+        self.performance_metrics = {
+            "total_signals_generated": 0,
+            "successful_signals_count": 0,
+            "failed_signals_count": 0,
+            "current_win_rate": 0.0
         }
-        self.consecutive_losses = 0
+        self.consecutive_loss_count = 0
 
-        # --- 메모리 효율적인 로그 관리 ---
-        self.signal_history = deque(maxlen=1000)
+        # 메모리 효율적인 신호 이력 관리
+        self.signal_history_buffer = deque(maxlen=1000)
 
-    def _load_settings(self):
-        """Redis에서 거래 설정을 불러오거나, 없으면 기본값을 사용합니다."""
-        settings_data = self.redis_client.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
-        if settings_data:
-            logger.debug("Redis에서 거래 설정을 불러옵니다.")
-            # Redis에서 가져온 데이터를 적절한 타입으로 파싱
-            parsed_settings = parse_redis_settings(settings_data)
-            self.settings = TradingSettings.model_validate(parsed_settings)
-        else:
-            logger.debug("기본 거래 설정을 사용합니다.")
+    def _initialize_trading_settings(self) -> None:
+        """거래 설정을 Redis에서 로드하거나 기본값으로 초기화"""
+        try:
+            settings_data = self.redis_client.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
+            if settings_data:
+                logger.debug("Redis에서 거래 설정 로드 완료")
+                parsed_settings = parse_redis_settings(settings_data)
+                self.settings = TradingSettings.model_validate(parsed_settings)
+            else:
+                logger.debug("기본 거래 설정 사용")
+                self.settings = TradingSettings()
+        except Exception as e:
+            logger.error(f"거래 설정 초기화 실패: {e}")
             self.settings = TradingSettings()
 
-    def _is_trading_time(self) -> bool:
-        """거래 활성 시간인지 확인합니다."""
+    def _is_within_trading_hours(self) -> bool:
+        """현재 시간이 거래 활성 시간 범위에 포함되는지 확인
+        
+        Returns:
+            거래 시간 여부
+        """
         current_hour = datetime.now().hour
         return any(
             start <= current_hour < end or (start > end and (current_hour >= start or current_hour < end))
             for start, end in self.settings.ACTIVE_HOURS
         )
 
-    def _should_generate_signal(self, symbol: str) -> tuple[bool, str]:
-        """신호 생성 조건을 검사합니다."""
-        if not self._is_trading_time():
-            return False, "거래 비활성 시간"
+    def _validate_signal_generation_conditions(self, symbol: str) -> tuple[bool, str]:
+        """신호 생성 가능 조건들을 종합적으로 검증
         
-        if self.consecutive_losses >= self.settings.MAX_CONSECUTIVE_LOSSES:
-            return False, f"최대 연속 손실({self.settings.MAX_CONSECUTIVE_LOSSES}) 도달"
-        
-        if symbol in self.last_signal_time:
-            time_diff = datetime.now() - self.last_signal_time[symbol]
-            if time_diff < self.signal_cooldown:
-                return False, f"신호 쿨다운 시간({self.signal_cooldown.total_seconds()}초) 미달"
-        
-        return True, ""
-
-    def _prepare_data(self, symbol: str, timeframe: str = "1m") -> pd.DataFrame:
-        """DB에서 지정된 타임프레임의 지표 데이터를 가져옵니다."""
-        try:
-            # 캐시 키 생성
-            cache_key = f"signal_data:{symbol}:{timeframe}"
+        Args:
+            symbol: 검증할 거래 심볼
             
-            # Redis에서 캐시된 데이터 확인
+        Returns:
+            (조건 만족 여부, 실패 사유)
+        """
+        # 거래 시간 확인
+        if not self._is_within_trading_hours():
+            return False, "거래 비활성 시간대"
+        
+        # 연속 손실 제한 확인
+        if self.consecutive_loss_count >= self.settings.MAX_CONSECUTIVE_LOSSES:
+            return False, f"최대 연속 손실({self.settings.MAX_CONSECUTIVE_LOSSES}) 한계 도달"
+        
+        # 신호 간격 제한 확인
+        if symbol in self.last_signal_timestamps:
+            time_elapsed = datetime.now() - self.last_signal_timestamps[symbol]
+            if time_elapsed < self.signal_cooldown_period:
+                remaining_seconds = (self.signal_cooldown_period - time_elapsed).total_seconds()
+                return False, f"신호 쿨다운 대기 중 (남은 시간: {remaining_seconds:.0f}초)"
+        
+        return True, "조건 만족"
+
+    def _load_market_data_with_cache(self, symbol: str, timeframe: str = "1m") -> pd.DataFrame:
+        """캐시를 활용하여 시장 데이터를 효율적으로 로드
+        
+        Args:
+            symbol: 거래 심볼
+            timeframe: 시간 프레임 (기본값: 1분)
+            
+        Returns:
+            기술적 지표가 포함된 시장 데이터 DataFrame
+            
+        Raises:
+            DataNotFoundException: 필요한 데이터를 찾을 수 없는 경우
+        """
+        try:
+            # Redis 캐시 키 생성
+            cache_key = f"market_data:{symbol}:{timeframe}"
+            
+            # 캐시된 데이터 확인 및 복원 시도
             cached_data = self.redis_client.get(cache_key)
             if cached_data:
                 try:
-                    # 캐시된 데이터를 DataFrame으로 복원
                     import pickle
                     df = pickle.loads(cached_data)
                     if not df.empty and len(df) >= 50:
-                        logger.debug(f"캐시된 데이터 사용: {symbol} ({timeframe})")
+                        logger.debug(f"캐시된 시장 데이터 사용: {symbol} ({timeframe})")
                         return df
                 except Exception as cache_error:
                     logger.warning(f"캐시 데이터 복원 실패: {cache_error}")
             
-            # DB에서 새로운 데이터 로드
+            # 데이터베이스에서 신규 데이터 로드
             df = self.db_repository.get_klines_by_symbol_as_df(symbol, limit=200)
             if df.empty:
-                raise DataNotFoundException(f"DB에 {symbol} ({timeframe}) 데이터가 없습니다")
+                raise DataNotFoundException(f"데이터베이스에 {symbol} ({timeframe}) 데이터가 존재하지 않음")
             
-            required = ['close', 'high', 'low', 'volume', 'atr', 'ema_20', 'sma_50', 'sma_200', 'rsi_14', 'macd_hist', 'stoch_k', 'stoch_d']
-            missing_cols = [col for col in required if col not in df.columns]
+            # 필수 기술적 지표 컬럼 검증
+            required_indicators = [
+                'close', 'high', 'low', 'volume', 'atr', 'ema_20', 
+                'sma_50', 'sma_200', 'rsi_14', 'macd_hist', 'stoch_k', 'stoch_d'
+            ]
+            missing_indicators = [col for col in required_indicators if col not in df.columns]
             
-            if missing_cols:
-                raise DataNotFoundException(f"필수 지표가 DB에 없습니다: {missing_cols}")
+            if missing_indicators:
+                raise DataNotFoundException(f"필수 기술적 지표 누락: {missing_indicators}")
             
-            df_clean = df.dropna()
+            # NaN 값 제거 후 유효성 검증
+            df_cleaned = df.dropna()
             
-            # 유효한 데이터만 캐시 저장 (5분간 유지)
-            if not df_clean.empty and len(df_clean) >= 50:
+            # 유효한 데이터를 캐시에 저장 (5분간 유지)
+            if not df_cleaned.empty and len(df_cleaned) >= 50:
                 try:
                     import pickle
-                    self.redis_client.setex(cache_key, 300, pickle.dumps(df_clean))
+                    self.redis_client.setex(cache_key, 300, pickle.dumps(df_cleaned))
+                    logger.debug(f"시장 데이터 캐시 저장 완료: {symbol}")
                 except Exception as cache_error:
                     logger.warning(f"데이터 캐시 저장 실패: {cache_error}")
             
-            return df_clean
+            return df_cleaned
             
         except DataNotFoundException:
             raise
         except Exception as e:
-            logger.error(f"데이터 준비 중 예기치 않은 오류: {symbol} - {e}")
-            raise DataNotFoundException(f"데이터 준비 실패: {str(e)}")
+            logger.error(f"시장 데이터 로드 중 예상치 못한 오류: {symbol} - {e}")
+            raise DataNotFoundException(f"시장 데이터 로드 실패: {str(e)}")
 
-    def _analyze_long_term_trend(self, df_long: pd.DataFrame) -> Dict[str, Any]:
-        """장기(15m) 추세 분석을 수행합니다."""
-        latest = df_long.iloc[0]
-        ema_20 = float(latest.get("ema_20", 0))
-        sma_50 = float(latest.get("sma_50", 0))
+    def _analyze_long_timeframe_trend(self, df_long: pd.DataFrame) -> Dict[str, Any]:
+        """장기 타임프레임 추세 분석 수행
         
-        if ema_20 > sma_50:
+        Args:
+            df_long: 장기 타임프레임 데이터 (15분봉)
+            
+        Returns:
+            장기 추세 분석 결과
+        """
+        latest_candle = df_long.iloc[0]
+        ema_20_value = float(latest_candle.get("ema_20", 0))
+        sma_50_value = float(latest_candle.get("sma_50", 0))
+        
+        if ema_20_value > sma_50_value:
             trend = TRADING["TRENDS"]["WEAK_UP"]
-        elif ema_20 < sma_50:
+        elif ema_20_value < sma_50_value:
             trend = TRADING["TRENDS"]["WEAK_DOWN"]
         else:
             trend = TRADING["TRENDS"]["NEUTRAL"]
             
         return {"trend": trend}
 
-    def _analyze_short_term_trend(self, latest: pd.Series) -> Dict[str, Any]:
-        """단기(1m) 추세 분석을 수행합니다."""
-        adx = float(latest.get("adx", 20))
-        trend = TRADING["TRENDS"]["NEUTRAL"]
+    def _analyze_short_timeframe_trend(self, latest_data: pd.Series) -> Dict[str, Any]:
+        """단기 타임프레임 추세 분석 수행
         
-        ema_20 = float(latest.get("ema_20", 0))
-        sma_50 = float(latest.get("sma_50", 0))
-        sma_200 = float(latest.get("sma_200", 0))
+        Args:
+            latest_data: 최신 캔들 데이터
+            
+        Returns:
+            단기 추세 분석 결과 
+        """
+        adx_value = float(latest_data.get("adx", 20))
+        trend_direction = TRADING["TRENDS"]["NEUTRAL"]
         
-        if ema_20 > sma_50 > sma_200: 
-            trend = TRADING["TRENDS"]["STRONG_UP"]
-        elif ema_20 > sma_50: 
-            trend = TRADING["TRENDS"]["WEAK_UP"]
-        elif ema_20 < sma_50 < sma_200: 
-            trend = TRADING["TRENDS"]["STRONG_DOWN"]
-        elif ema_20 < sma_50: 
-            trend = TRADING["TRENDS"]["WEAK_DOWN"]
+        ema_20_value = float(latest_data.get("ema_20", 0))
+        sma_50_value = float(latest_data.get("sma_50", 0))
+        sma_200_value = float(latest_data.get("sma_200", 0))
+        
+        if ema_20_value > sma_50_value > sma_200_value: 
+            trend_direction = TRADING["TRENDS"]["STRONG_UP"]
+        elif ema_20_value > sma_50_value: 
+            trend_direction = TRADING["TRENDS"]["WEAK_UP"]
+        elif ema_20_value < sma_50_value < sma_200_value: 
+            trend_direction = TRADING["TRENDS"]["STRONG_DOWN"]
+        elif ema_20_value < sma_50_value: 
+            trend_direction = TRADING["TRENDS"]["WEAK_DOWN"]
 
-        adx_strength = min(adx / 40, 1.0)
-        base_strength = 0.9 if "STRONG" in trend else 0.7 if "WEAK" in trend else 0.4
+        # ADX 기반 추세 강도 계산 (0~1 정규화)
+        adx_strength = min(adx_value / 40, 1.0)
+        base_strength = 0.9 if "STRONG" in trend_direction else 0.7 if "WEAK" in trend_direction else 0.4
         
         return {
-            "trend": trend, 
+            "trend": trend_direction, 
             "strength": base_strength * adx_strength, 
-            "adx": adx
+            "adx": adx_value
         }
 
-    def _analyze_momentum(self, df: pd.DataFrame, trend_context: Dict[str, Any]) -> tuple[float, Dict[str, Any]]:
-        """동적 가중치와 동적 임계값을 사용하여 모멘텀 분석을 수행합니다."""
-        latest = df.iloc[0]
+    def _calculate_momentum_score(self, market_data: pd.DataFrame, trend_context: Dict[str, Any]) -> tuple[float, Dict[str, Any]]:
+        """동적 가중치와 임계값을 활용한 모멘텀 점수 계산
+        
+        Args:
+            market_data: 시장 데이터 DataFrame
+            trend_context: 추세 분석 컨텍스트
+            
+        Returns:
+            (모멘텀 점수, 상세 분석 정보)
+        """
+        latest_data = market_data.iloc[0]
         scores = {}
         weights = {"rsi": 1.0, "macd": 1.0, "stoch": 1.0} # 기본 가중치
 
@@ -204,29 +272,32 @@ class SignalService:
             weights["stoch"] = 1.2
 
         # 동적 RSI 임계값 계산 (최근 50개 데이터의 표준편차 활용)
-        rsi_std = df['rsi_14'].head(50).std()
+        rsi_std = market_data['rsi_14'].head(50).std()
         dynamic_upper_rsi = min(70, 50 + 2 * rsi_std)
         dynamic_lower_rsi = max(30, 50 - 2 * rsi_std)
 
         # RSI 점수 계산
-        rsi = latest.get("rsi_14", 50)
-        if rsi < dynamic_lower_rsi: scores["rsi"] = 0.8
-        elif rsi > dynamic_upper_rsi: scores["rsi"] = -0.8
-        else: scores["rsi"] = 0.0
+        rsi_value = latest_data.get("rsi_14", 50)
+        if rsi_value < dynamic_lower_rsi: 
+            scores["rsi"] = 0.8
+        elif rsi_value > dynamic_upper_rsi: 
+            scores["rsi"] = -0.8
+        else: 
+            scores["rsi"] = 0.0
         
         # MACD 히스토그램 점수
-        macd_hist = latest.get("macd_hist", 0)
-        if abs(macd_hist) > self.settings.PRICE_MOMENTUM_THRESHOLD:
-            scores["macd"] = 0.6 if macd_hist > 0 else -0.6
+        macd_hist_value = latest_data.get("macd_hist", 0)
+        if abs(macd_hist_value) > self.settings.PRICE_MOMENTUM_THRESHOLD:
+            scores["macd"] = 0.6 if macd_hist_value > 0 else -0.6
         else:
             scores["macd"] = 0.0
         
         # Stochastic 점수
-        stoch_k = latest.get("stoch_k", 50)
-        stoch_d = latest.get("stoch_d", 50)
-        if stoch_k < 20 and stoch_d < 20:
+        stoch_k_value = latest_data.get("stoch_k", 50)
+        stoch_d_value = latest_data.get("stoch_d", 50)
+        if stoch_k_value < 20 and stoch_d_value < 20:
             scores["stoch"] = 0.7
-        elif stoch_k > 80 and stoch_d > 80:
+        elif stoch_k_value > 80 and stoch_d_value > 80:
             scores["stoch"] = -0.7
         else:
             scores["stoch"] = 0.0
@@ -243,157 +314,239 @@ class SignalService:
         }
         return final_score, details
 
-    def _analyze_volume_and_volatility(self, latest: pd.Series) -> tuple[float, Dict[str, Any]]:
-        """거래량과 변동성 분석을 수행합니다."""
-        volume_ratio = latest.get("volume_ratio", 1.0)
-        volatility = latest.get("volatility_20d", 0.02)
+    def _analyze_volume_and_volatility(self, latest_data: pd.Series) -> tuple[float, Dict[str, Any]]:
+        """거래량 패턴과 변동성 수준 분석
         
-        volume_spike = volume_ratio > self.settings.VOLUME_SPIKE_THRESHOLD
-        high_volatility = volatility > DEFAULTS["VOLATILITY_HIGH_THRESHOLD"]
+        Args:
+            latest_data: 최신 캔들 데이터
+            
+        Returns:
+            (변동성 점수, 상세 분석 정보)
+        """
+        volume_ratio = latest_data.get("volume_ratio", 1.0)
+        volatility_level = latest_data.get("volatility_20d", 0.02)
+        
+        is_volume_spike = volume_ratio > self.settings.VOLUME_SPIKE_THRESHOLD
+        is_high_volatility = volatility_level > DEFAULTS["VOLATILITY_HIGH_THRESHOLD"]
         
         volume_weight = min(volume_ratio / 2, 1.5)
-        volatility_weight = 0.8 if high_volatility else 1.2
+        volatility_weight = 0.8 if is_high_volatility else 1.2
         
         return volume_weight * volatility_weight, {
             "volume_ratio": volume_ratio,
-            "volatility": volatility,
-            "volume_spike": volume_spike,
-            "high_volatility": high_volatility
+            "volatility": volatility_level,
+            "volume_spike": is_volume_spike,
+            "high_volatility": is_high_volatility
         }
 
-    def _calculate_position_size(self, latest: pd.Series) -> float:
-        """포지션 크기를 계산합니다."""
-        atr = float(latest.get("atr", latest.get("close", 0) * 0.02))
-        close_price = float(latest.get("close", 0))
+    def _calculate_optimal_position_size(self, latest_data: pd.Series) -> float:
+        """ATR 기반 최적 포지션 크기 계산
         
-        if close_price <= 0 or atr <= 0:
+        Args:
+            latest_data: 최신 캔들 데이터
+            
+        Returns:
+            계산된 포지션 크기
+        """
+        atr_value = float(latest_data.get("atr", latest_data.get("close", 0) * 0.02))
+        current_price = float(latest_data.get("close", 0))
+        
+        if current_price <= 0 or atr_value <= 0:
             return DEFAULTS["POSITION_SIZE"]
         
+        # 리스크 기반 포지션 크기 계산
         risk_amount = self.settings.ACCOUNT_BALANCE * self.settings.RISK_PER_TRADE
-        position_size = (risk_amount / atr) * self.settings.LEVERAGE
+        position_size = (risk_amount / atr_value) * self.settings.LEVERAGE
         
+        # 포지션 크기 제한 적용
         min_position = self.settings.ACCOUNT_BALANCE * 0.01
         max_position = self.settings.ACCOUNT_BALANCE * 0.1
         
         return max(min_position, min(position_size, max_position))
 
-    def _calculate_stop_loss(self, latest: pd.Series, signal_type: str) -> float:
-        """손절선을 계산합니다."""
-        close_price = float(latest.get("close", 0))
-        atr = float(latest.get("atr", close_price * 0.02))
+    def _calculate_stop_loss_level(self, latest_data: pd.Series, signal_direction: str) -> float:
+        """ATR 기반 손절선 수준 계산
         
-        if signal_type == TRADING["SIGNALS"]["BUY"]:
-            return close_price - (atr * self.settings.ATR_MULTIPLIER)
+        Args:
+            latest_data: 최신 캔들 데이터
+            signal_direction: 신호 방향 ("BUY" 또는 "SELL")
+            
+        Returns:
+            계산된 손절선 가격
+        """
+        current_price = float(latest_data.get("close", 0))
+        atr_value = float(latest_data.get("atr", current_price * 0.02))
+        
+        if signal_direction == TRADING["SIGNALS"]["BUY"]:
+            return current_price - (atr_value * self.settings.ATR_MULTIPLIER)
         else:
-            return close_price + (atr * self.settings.ATR_MULTIPLIER)
+            return current_price + (atr_value * self.settings.ATR_MULTIPLIER)
 
-    def update_performance(self, result: str):
-        """성과 통계를 업데이트합니다."""
-        self.performance_stats["total_signals"] += 1
+    def update_trading_performance(self, trading_result: str) -> None:
+        """거래 결과에 따른 성과 지표 업데이트
         
-        if result == TRADING["RESULTS"]["PROFIT"]:
-            self.performance_stats["successful_signals"] += 1
-            self.consecutive_losses = 0
+        Args:
+            trading_result: 거래 결과 ("PROFIT" 또는 "LOSS")
+        """
+        self.performance_metrics["total_signals_generated"] += 1
+        
+        if trading_result == TRADING["RESULTS"]["PROFIT"]:
+            self.performance_metrics["successful_signals_count"] += 1
+            self.consecutive_loss_count = 0  # 성공 시 연속 손실 카운트 리셋
         else:
-            self.performance_stats["failed_signals"] += 1
-            self.consecutive_losses += 1
+            self.performance_metrics["failed_signals_count"] += 1
+            self.consecutive_loss_count += 1
         
-        if self.performance_stats["total_signals"] > 0:
-            self.performance_stats["win_rate"] = (
-                self.performance_stats["successful_signals"] / 
-                self.performance_stats["total_signals"]
+        # 승률 계산 및 업데이트
+        if self.performance_metrics["total_signals_generated"] > 0:
+            self.performance_metrics["current_win_rate"] = (
+                self.performance_metrics["successful_signals_count"] / 
+                self.performance_metrics["total_signals_generated"]
             )
         
+        # Redis에 성과 지표 저장
         performance_key = f"{REDIS_KEYS['PERFORMANCE']}"
-        self.redis_client.hmset(performance_key, self.performance_stats)
+        self.redis_client.hmset(performance_key, self.performance_metrics)
         
         logger.info(
-            f"성과 업데이트 - result: {result}, win_rate: {self.performance_stats['win_rate']:.3f}, consecutive_losses: {self.consecutive_losses}"
+            f"거래 성과 업데이트 - 결과: {trading_result}, "
+            f"승률: {self.performance_metrics['current_win_rate']:.3f}, "
+            f"연속 손실: {self.consecutive_loss_count}"
         )
 
-    def get_performance_stats(self) -> Dict[str, Any]:
-        """성과 통계를 반환합니다."""
+    def get_current_performance_metrics(self) -> Dict[str, Any]:
+        """현재 성과 지표 조회
+        
+        Returns:
+            성과 통계가 포함된 API 응답
+        """
         return create_api_response(
             success=True,
-            data=self.performance_stats,
-            message="성과 통계 조회 완료"
+            data=self.performance_metrics,
+            message="성과 지표 조회 완료"
         )
 
-    def get_combined_trading_signal(self, symbol: str) -> TradingSignal:
-        """다중 타임프레임 분석과 동적 로직을 통합한 거래 신호를 생성합니다."""
-        can_signal, reason = self._should_generate_signal(symbol)
-        if not can_signal:
-            return TradingSignal(symbol=symbol, timestamp=datetime.now(), signal=TRADING["SIGNALS"]["HOLD"], confidence_score=0.0, message=reason)
+    def generate_comprehensive_trading_signal(self, symbol: str) -> TradingSignal:
+        """다중 타임프레임 분석을 통한 종합적인 거래 신호 생성
+        
+        Args:
+            symbol: 분석할 거래 심볼
+            
+        Returns:
+            생성된 거래 신호 객체
+        """
+        # 신호 생성 조건 검증
+        can_generate, rejection_reason = self._validate_signal_generation_conditions(symbol)
+        if not can_generate:
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(), 
+                signal=TRADING["SIGNALS"]["HOLD"], 
+                confidence_score=0.0, 
+                message=rejection_reason
+            )
 
         try:
-            # 1. 데이터 준비 (단기: 1m, 장기: 15m)
-            # 참고: _prepare_data가 타임프레임을 인자로 받도록 수정되었다고 가정합니다.
-            # 지금은 동일한 메소드를 사용하지만, 실제로는 다른 데이터를 가져와야 합니다.
-            df_short = self._prepare_data(symbol, "1m")
-            df_long = self._prepare_data(symbol, "15m") # 이 부분은 실제 DB 구현에 따라 달라집니다.
+            # 다중 타임프레임 데이터 로드
+            short_timeframe_data = self._load_market_data_with_cache(symbol, "1m")
+            long_timeframe_data = self._load_market_data_with_cache(symbol, "15m")
             
-            if len(df_short) < 50 or len(df_long) < 2: # 동적 RSI 계산을 위해 충분한 데이터 필요
-                return TradingSignal(symbol=symbol, timestamp=datetime.now(), signal=TRADING["SIGNALS"]["HOLD"], confidence_score=0.0, message="데이터 부족")
+            # 데이터 충분성 검증
+            if len(short_timeframe_data) < 50 or len(long_timeframe_data) < 2:
+                return TradingSignal(
+                    symbol=symbol, 
+                    timestamp=datetime.now(), 
+                    signal=TRADING["SIGNALS"]["HOLD"], 
+                    confidence_score=0.0, 
+                    message="분석에 필요한 데이터 부족"
+                )
 
-            latest_short = df_short.iloc[0]
+            latest_short_data = short_timeframe_data.iloc[0]
 
-            # 2. 장기 및 단기 추세 분석
-            long_term_trend_context = self._analyze_long_term_trend(df_long)
-            short_term_trend_context = self._analyze_short_term_trend(latest_short)
+            # 타임프레임별 추세 분석
+            long_trend_analysis = self._analyze_long_timeframe_trend(long_timeframe_data)
+            short_trend_analysis = self._analyze_short_timeframe_trend(latest_short_data)
 
-            # 3. 동적 모멘텀 분석 (단기 추세 컨텍스트 사용)
-            momentum_score, momentum_details = self._analyze_momentum(df_short, short_term_trend_context)
+            # 모멘텀 분석 (단기 추세 컨텍스트 활용)
+            momentum_score, momentum_details = self._calculate_momentum_score(short_timeframe_data, short_trend_analysis)
             
-            # 4. 거래량 및 변동성 분석
-            volume_weight, volume_details = self._analyze_volume_and_volatility(latest_short)
+            # 거래량 및 변동성 분석
+            volume_weight, volume_details = self._analyze_volume_and_volatility(latest_short_data)
             
-            # 5. 종합 점수 계산
-            final_score = momentum_score * volume_weight * short_term_trend_context["strength"]
+            # 종합 신호 점수 계산
+            comprehensive_score = momentum_score * volume_weight * short_trend_analysis["strength"]
             
-            # 6. 신호 결정 (장기 추세 필터링 추가)
-            signal = TRADING["SIGNALS"]["HOLD"]
-            long_term_trend = long_term_trend_context["trend"]
+            # 장기 추세 필터를 통한 신호 결정
+            final_signal = TRADING["SIGNALS"]["HOLD"]
+            long_term_trend = long_trend_analysis["trend"]
             
-            if final_score > 0.4 and "UP" in long_term_trend: # 매수 신호는 장기 추세가 상승일 때만
-                signal = TRADING["SIGNALS"]["BUY"]
-            elif final_score < -0.4 and "DOWN" in long_term_trend: # 매도 신호는 장기 추세가 하락일 때만
-                signal = TRADING["SIGNALS"]["SELL"]
+            if comprehensive_score > 0.4 and "UP" in long_term_trend:
+                final_signal = TRADING["SIGNALS"]["BUY"]
+            elif comprehensive_score < -0.4 and "DOWN" in long_term_trend:
+                final_signal = TRADING["SIGNALS"]["SELL"]
             
-            # 7. 포지션 크기 및 손절선 계산
-            position_size = self._calculate_position_size(latest_short)
-            stop_loss_price = self._calculate_stop_loss(latest_short, signal)
+            # 포지션 크기 및 손절선 수준 계산
+            optimal_position_size = self._calculate_optimal_position_size(latest_short_data)
+            stop_loss_level = self._calculate_stop_loss_level(latest_short_data, final_signal)
             
-            self.last_signal_time[symbol] = datetime.now()
+            # 신호 생성 시간 기록
+            self.last_signal_timestamps[symbol] = datetime.now()
             
-            metadata = {
-                "long_term_trend": long_term_trend_context,
-                "short_term_trend": short_term_trend_context,
+            # 상세 메타데이터 구성
+            signal_metadata = {
+                "long_term_trend": long_trend_analysis,
+                "short_term_trend": short_trend_analysis,
                 "momentum": momentum_details,
                 "volume": volume_details,
-                "tech": {
-                    "close_price": float(latest_short.get("close", 0)),
-                    "atr": float(latest_short.get("atr", 0)),
-                    "rsi": float(latest_short.get("rsi_14", 50)),
-                    "macd_hist": float(latest_short.get("macd_hist", 0))
+                "technical_indicators": {
+                    "close_price": float(latest_short_data.get("close", 0)),
+                    "atr": float(latest_short_data.get("atr", 0)),
+                    "rsi": float(latest_short_data.get("rsi_14", 50)),
+                    "macd_hist": float(latest_short_data.get("macd_hist", 0))
                 }
             }
             
+            # 거래 신호 객체 생성
             trading_signal = TradingSignal(
-                symbol=symbol, timestamp=datetime.now(), signal=signal,
-                confidence_score=float(abs(final_score)), position_size=float(position_size),
-                stop_loss_price=float(stop_loss_price), metadata=metadata
+                symbol=symbol, 
+                timestamp=datetime.now(), 
+                signal=final_signal,
+                confidence_score=float(abs(comprehensive_score)), 
+                position_size=float(optimal_position_size),
+                stop_loss_price=float(stop_loss_level), 
+                metadata=signal_metadata
             )
             
-            self.signal_history.append({
-                "symbol": symbol, "timestamp": datetime.now().isoformat(), "signal": signal,
-                "confidence": float(abs(final_score)), "final_score": float(final_score)
+            # 신호 이력 저장
+            self.signal_history_buffer.append({
+                "symbol": symbol, 
+                "timestamp": datetime.now().isoformat(), 
+                "signal": final_signal,
+                "confidence": float(abs(comprehensive_score)), 
+                "comprehensive_score": float(comprehensive_score)
             })
             
             return trading_signal
 
         except DataNotFoundException as e:
             logger.warning(f"{symbol} 신호 생성 실패: {e}")
-            return TradingSignal(symbol=symbol, timestamp=datetime.now(), signal=TRADING["SIGNALS"]["HOLD"], confidence_score=0.0, message=str(e))
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(), 
+                signal=TRADING["SIGNALS"]["HOLD"], 
+                confidence_score=0.0, 
+                message=str(e)
+            )
         except Exception as e:
-            logger.error(f"{symbol} 신호 생성 중 예기치 않은 오류 발생: {e}", exc_info=True)
-            return TradingSignal(symbol=symbol, timestamp=datetime.now(), signal=TRADING["SIGNALS"]["HOLD"], confidence_score=0.0, message="Internal server error")
+            logger.error(f"{symbol} 신호 생성 중 예상치 못한 오류 발생: {e}", exc_info=True)
+            return TradingSignal(
+                symbol=symbol, 
+                timestamp=datetime.now(), 
+                signal=TRADING["SIGNALS"]["HOLD"], 
+                confidence_score=0.0, 
+                message="내부 서버 오류로 인한 신호 생성 실패"
+            )
+
+
+# 하위 호환성을 위한 클래스 별칭
+SignalService = TradingSignalAnalyzer

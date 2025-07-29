@@ -95,7 +95,7 @@ class BinanceAdapter:
             logger.error(f"1분봉 데이터 조회 실패", symbol=symbol, error=str(e))
             return None
 
-    @retry_on_failure(max_retries=3, delay=1)
+    @retry_on_failure(max_retries=3, delay_seconds=1)
     def get_order_book(
         self, symbol: str, limit: int = 20
     ) -> dict | None:

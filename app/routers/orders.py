@@ -1,5 +1,13 @@
 """
-주문 관련 API 라우터를 정의하는 모듈입니다.
+거래 주문 및 포지션 관리 API 라우터
+
+이 모듈은 거래 주문 실행과 포지션 관리와 관련된 API 엔드포인트를 제공합니다.
+
+주요 기능:
+- 거래 주문 생성 및 실행
+- 활성 포지션 조회 및 관리
+- 포지션 모니터링 및 리스크 관리
+- 거래 상태 및 통계 조회
 """
 
 from fastapi import APIRouter, Depends, Query, HTTPException
@@ -9,42 +17,46 @@ import logging
 
 from app.core.db import get_redis
 from app.core.config import settings
-from app.services.order_service import OrderService
+from app.services.order_service import TradingOrderManager
 from app.adapters.binance_adapter import BinanceAdapter
 from app.schemas.core import TradingSignal
-from app.utils.helpers import create_api_response
+from app.utils.helpers import create_standardized_api_response, create_api_response  # 하위 호환성
 from app.core.dependencies import OrderServiceDep, BinanceAdapterDep, DbRepositoryDep
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
-# --- Health Check --- #
+# 거래 주문 및 포지션 관리 API 엔드포인트
 
 @router.get("/health")
-async def health_check():
-    """주문 서비스 상태를 확인합니다."""
-    return create_api_response(
-        success=True,
-        data={"status": "healthy"},
-        message="주문 서비스가 정상적으로 작동 중입니다."
+async def check_order_service_health():
+    """주문 서비스 헬스체크 엔드포인트"""
+    return create_standardized_api_response(
+        is_success=True,
+        data={"service_status": "healthy", "service_name": "trading_order_manager"},
+        message="거래 주문 관리 서비스가 정상 동작 중입니다."
     )
 
-# --- 포지션 관리 API --- #
+# 포지션 관리 API 엔드포인트
 
 @router.get(
     "/positions",
-    summary="현재 활성 포지션 조회",
-    description="OrderService에 의해 현재 관리되고 있는 모든 활성 포지션의 상세 정보를 조회합니다."
+    summary="활성 포지션 목록 조회",
+    description="현재 관리 중인 모든 활성 포지션의 상세 정보를 조회합니다."
 )
-async def get_active_positions(
+async def get_all_active_positions(
     order_service: OrderServiceDep
 ):
-    """활성 포지션 목록을 조회합니다."""
+    """활성 포지션 목록 조회 엔드포인트
+    
+    Returns:
+        현재 활성화된 모든 포지션의 요약 정보
+    """
     try:
-        summary = order_service.get_position_summary()
-        return summary
+        position_summary = order_service.get_position_summary()
+        return position_summary
     except Exception as e:
-        logger.error(f"포지션 조회 중 오류: {str(e)}")
+        logger.error(f"활성 포지션 조회 중 오류: {str(e)}")
         return create_api_response(
             success=False,
             data={},

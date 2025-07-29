@@ -1,11 +1,14 @@
 
 """
-실시간 거래 주문과 포지션을 관리하는 고도화된 서비스입니다.
+실시간 거래 주문 및 포지션 관리 서비스
 
-주요 특징:
-- **타입 안정성**: Pydantic 모델(PositionData)을 사용하여 Redis 데이터의 타입 불일치 문제를 해결합니다.
-- **고성능 동시성**: asyncio.gather를 활용하여 다수의 포지션을 병렬로 모니터링합니다.
-- **지능형 리스크 관리**: 단순 손절 외에 변동성, 시간 기반의 다각적 포지션 종료 로직을 갖추고 있습니다.
+이 모듈은 거래 주문 실행과 포지션 모니터링을 담당합니다.
+
+주요 기능:
+- 안전한 거래 주문 실행 및 검증
+- 실시간 포지션 모니터링 및 리스크 관리
+- 동적 손절선 및 이익 실현 로직
+- 고성능 비동기 처리를 통한 다중 포지션 관리
 """
 import asyncio
 import json
@@ -34,23 +37,35 @@ from app.utils.logging import get_logger
 
 logger = get_logger(__name__)
 
-class PositionData(BaseModel):
-    """Redis에 저장되는 포지션 데이터의 타입 안정성을 보장하는 Pydantic 모델"""
-    symbol: str
-    side: str
-    entry_price: float
-    position_size: float
-    initial_stop_loss: float
-    current_stop_loss: float
-    initial_risk_distance: float
-    trailing_stop_activated: bool = False
-    highest_price_so_far: float
-    lowest_price_so_far: float
-    entry_timestamp: datetime = Field(default_factory=datetime.utcnow)
+class PositionInfo(BaseModel):
+    """포지션 정보 데이터 모델
+    
+    Redis에 저장되는 포지션 데이터의 타입 안정성을 보장하고
+    일관된 데이터 구조를 제공합니다.
+    """
+    symbol: str = Field(description="거래 심볼")
+    side: str = Field(description="포지션 방향 (LONG/SHORT)")
+    entry_price: float = Field(description="진입 가격")
+    position_size: float = Field(description="포지션 크기")
+    initial_stop_loss: float = Field(description="초기 손절선 가격")
+    current_stop_loss: float = Field(description="현재 손절선 가격")
+    initial_risk_distance: float = Field(description="초기 리스크 거리")
+    trailing_stop_activated: bool = Field(default=False, description="트레일링 스톱 활성화 여부")
+    highest_price_so_far: float = Field(description="최고 도달 가격")
+    lowest_price_so_far: float = Field(description="최저 도달 가격")
+    entry_timestamp: datetime = Field(default_factory=datetime.utcnow, description="진입 시간")
 
     @classmethod
-    def from_redis(cls, redis_data: Dict[str, str]) -> "PositionData":
-        """Redis 데이터에서 PositionData 객체를 생성합니다."""
+    def from_redis_data(cls, redis_data: Dict[str, str]) -> "PositionInfo":
+        """Redis 데이터로부터 PositionInfo 객체 생성
+        
+        Args:
+            redis_data: Redis에서 가져온 원시 데이터
+            
+        Returns:
+            파싱된 PositionInfo 객체
+        """
+        """Redis 데이터로부터 PositionInfo 객체 생성"""
         processed_data = {}
         for key, value in redis_data.items():
             if key == 'trailing_stop_activated':
@@ -79,8 +94,12 @@ class PositionData(BaseModel):
         pnl = self.calculate_profit_loss(current_price)
         return (pnl / self.entry_price) * 100
 
-class OrderService:
-    """주문 및 포지션 관리 서비스"""
+class TradingOrderManager:
+    """거래 주문 및 포지션 관리 서비스
+    
+    실시간 거래 주문 실행과 포지션 모니터링을 담당하며,
+    리스크 관리와 손절/익절 로직을 포함합니다.
+    """
     
     def __init__(
         self,
@@ -89,37 +108,52 @@ class OrderService:
         signal_service: SignalService,
         redis_client: Redis,
     ):
-        self.db_repo = db_repository
-        self.binance_adapter = binance_adapter
-        self.signal_service = signal_service
-        self.redis = redis_client
-        self.monitoring_interval = DEFAULTS["MONITORING_INTERVAL"]
+        """거래 주문 관리자 초기화
+        
+        Args:
+            db_repository: 데이터베이스 저장소
+            binance_adapter: 바이낸스 API 어댑터
+            signal_service: 신호 생성 서비스
+            redis_client: Redis 캐시 클라이언트
+        """
+        self.database_repository = db_repository
+        self.exchange_adapter = binance_adapter
+        self.signal_analyzer = signal_service
+        self.cache_client = redis_client
+        self.position_monitoring_interval = DEFAULTS["MONITORING_INTERVAL"]
 
-        # 동적 거래 설정 로드
-        self._load_settings()
+        # 거래 설정 초기화
+        self._initialize_trading_settings()
 
-        # 리스크 관리 설정
-        self.max_position_hold_time = timedelta(hours=DEFAULTS["MAX_POSITION_HOLD_HOURS"])
+        # 리스크 관리 매개변수
+        self.max_position_duration = timedelta(hours=DEFAULTS["MAX_POSITION_HOLD_HOURS"])
         self.volatility_exit_threshold = DEFAULTS["VOLATILITY_EXIT_THRESHOLD"]
 
-    def _load_settings(self):
-        """Redis에서 거래 설정을 불러오거나, 없으면 기본값을 사용합니다."""
-        settings_data = self.redis.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
-        if settings_data:
-            logger.debug("Redis에서 거래 설정을 불러옵니다.")
-            # Redis에서 가져온 데이터를 적절한 타입으로 파싱
-            parsed_settings = parse_redis_settings(settings_data)
-            self.settings = TradingSettings.model_validate(parsed_settings)
-        else:
-            logger.debug("기본 거래 설정을 사용합니다.")
+    def _initialize_trading_settings(self) -> None:
+        """거래 설정을 Redis에서 로드하거나 기본값으로 초기화"""
+        try:
+            settings_data = self.cache_client.hgetall(REDIS_KEYS["TRADING_SETTINGS"])
+            if settings_data:
+                logger.debug("Redis에서 거래 설정 로드 완료")
+                parsed_settings = parse_redis_settings(settings_data)
+                self.settings = TradingSettings.model_validate(parsed_settings)
+            else:
+                logger.debug("기본 거래 설정 사용")
+                self.settings = TradingSettings()
+        except Exception as e:
+            logger.error(f"거래 설정 초기화 실패: {e}")
             self.settings = TradingSettings()
 
     def _get_position_key(self, symbol: str) -> str:
         """포지션 키를 생성합니다."""
         return get_redis_key("POSITION", symbol)
 
-    def get_all_positions(self) -> List[PositionData]:
-        """모든 활성 포지션을 조회합니다."""
+    def get_all_active_positions(self) -> List[PositionInfo]:
+        """활성 포지션 목록 조회
+        
+        Returns:
+            현재 활성화된 모든 포지션 리스트
+        """
         try:
             positions = []
             # Redis에서 모든 포지션 키를 찾습니다
@@ -130,7 +164,7 @@ class OrderService:
                 try:
                     position_data = self.redis.hgetall(key)
                     if position_data:
-                        position = PositionData.from_redis(position_data)
+                        position = PositionInfo.from_redis_data(position_data)
                         positions.append(position)
                 except Exception as e:
                     logger.warning(f"포지션 데이터 파싱 실패: {key}, 오류: {e}")
@@ -141,7 +175,7 @@ class OrderService:
             logger.error(f"포지션 조회 중 오류 발생: {e}")
             return []
 
-    @retry_on_failure(max_retries=3, delay=1.0)
+    @retry_on_failure(max_retries=3, delay_seconds=1.0)
     async def process_signal(self, signal: TradingSignal) -> Dict[str, any]:
         """매매 신호를 처리하고 포지션을 생성합니다."""
         symbol = validate_symbol(signal.symbol)
@@ -177,8 +211,15 @@ class OrderService:
                 data=position.model_dump()
             )
 
-    def _create_position_from_signal(self, signal: TradingSignal) -> PositionData:
-        """거래 신호에서 포지션 데이터를 생성합니다."""
+    def _create_position_from_signal(self, signal: TradingSignal) -> PositionInfo:
+        """거래 신호로부터 포지션 정보 생성
+        
+        Args:
+            signal: 거래 신호 객체
+            
+        Returns:
+            생성된 포지션 정보
+        """
         close_price = signal.metadata.get('tech', {}).get('close_price')
         if not close_price:
             raise OrderServiceException("신호에 종가 정보가 없습니다")
@@ -187,7 +228,7 @@ class OrderService:
         position_size = signal.position_size or DEFAULTS["POSITION_SIZE"]
         stop_loss_price = signal.stop_loss_price or close_price * (1 - DEFAULTS["STOP_LOSS_RATIO"])
         
-        return PositionData(
+        return PositionInfo(
             symbol=signal.symbol,
             side=TRADING["SIDES"]["LONG"] if signal.signal == TRADING["SIGNALS"]["BUY"] else TRADING["SIDES"]["SHORT"],
             entry_price=close_price,
@@ -269,7 +310,7 @@ class OrderService:
             logger.error(f"포지션 모니터링 개별 오류 ({position_key_raw}): {type(e).__name__}: {str(e)}")
             raise  # gather에서 exception으로 수집되도록 raise
 
-    def _load_position_from_redis(self, position_key: str) -> Optional[PositionData]:
+    def _load_position_from_redis(self, position_key: str) -> Optional[PositionInfo]:
         """Redis에서 포지션 데이터를 로드합니다."""
         try:
             raw_data = self.redis.hgetall(position_key)
@@ -293,13 +334,13 @@ class OrderService:
             symbol = symbol_parts[1]
             decoded_data['symbol'] = symbol
             
-            return PositionData.from_redis(decoded_data)
+            return PositionInfo.from_redis_data(decoded_data)
             
         except Exception as e:
             logger.error(f"포지션 데이터 로드 실패 ({position_key}): {type(e).__name__}: {str(e)}")
             return None
 
-    def _check_exit_conditions(self, pos: PositionData, price: float) -> Optional[str]:
+    def _check_exit_conditions(self, pos: PositionInfo, price: float) -> Optional[str]:
         """다각적 포지션 종료 조건을 확인합니다."""
         # 1. 기본 손절
         if (pos.side == TRADING["SIDES"]["LONG"] and price <= pos.current_stop_loss) or \
@@ -326,7 +367,7 @@ class OrderService:
         
         return None
 
-    async def _close_position(self, pos: PositionData, price: float, reason: str):
+    async def _close_position(self, pos: PositionInfo, price: float, reason: str):
         """포지션을 종료합니다."""
         try:
             # 실제 거래소에서 포지션 종료 주문 실행
@@ -362,7 +403,7 @@ class OrderService:
             self.redis.delete(self._get_position_key(pos.symbol))
             raise OrderServiceException(f"포지션 종료 실패: {str(e)}")
 
-    async def _update_trailing_stop(self, pos: PositionData, price: float):
+    async def _update_trailing_stop(self, pos: PositionInfo, price: float):
         """동적 손절 로직을 업데이트합니다."""
         key = self._get_position_key(pos.symbol)
         updated = False
@@ -396,7 +437,7 @@ class OrderService:
                     new_stop_loss=new_stop_loss
                 )
 
-    def _should_activate_trailing_stop(self, pos: PositionData, price: float) -> bool:
+    def _should_activate_trailing_stop(self, pos: PositionInfo, price: float) -> bool:
         """트레일링 스탑 활성화 조건을 확인합니다."""
         activation_price_long = pos.entry_price + (pos.initial_risk_distance * self.settings.TP_RATIO)
         activation_price_short = pos.entry_price - (pos.initial_risk_distance * self.settings.TP_RATIO)
@@ -404,7 +445,7 @@ class OrderService:
         return (pos.side == TRADING["SIDES"]["LONG"] and price >= activation_price_long) or \
                (pos.side == TRADING["SIDES"]["SHORT"] and price <= activation_price_short)
 
-    def _calculate_new_stop_loss(self, pos: PositionData, price: float) -> float:
+    def _calculate_new_stop_loss(self, pos: PositionInfo, price: float) -> float:
         """새로운 손절선을 계산합니다."""
         atr_val = pos.initial_risk_distance
         
@@ -415,14 +456,14 @@ class OrderService:
             lowest = min(pos.lowest_price_so_far, price)
             return lowest + (atr_val * self.settings.ATR_MULTIPLIER)
 
-    def _should_update_stop_loss(self, pos: PositionData, new_stop_loss: float) -> bool:
+    def _should_update_stop_loss(self, pos: PositionInfo, new_stop_loss: float) -> bool:
         """손절선 업데이트 여부를 결정합니다."""
         if pos.side == TRADING["SIDES"]["LONG"]:
             return new_stop_loss > pos.current_stop_loss
         else:
             return new_stop_loss < pos.current_stop_loss
 
-    def get_position(self, symbol: str) -> Optional[PositionData]:
+    def get_position(self, symbol: str) -> Optional[PositionInfo]:
         """특정 심볼의 포지션을 조회합니다."""
         try:
             position_key = self._get_position_key(symbol)
@@ -566,3 +607,8 @@ class OrderService:
             data={"auto_trading_enabled": self.settings.AUTO_TRADING_ENABLED},
             message=f"자동 거래가 {status}되었습니다."
         )
+
+
+# 하위 호환성을 위한 별칭
+PositionData = PositionInfo
+OrderService = TradingOrderManager

@@ -4,7 +4,7 @@ SQLAlchemy를 사용하여 PostgreSQL DB와 상호작용합니다.
 """
 import pandas as pd
 from sqlalchemy.orm import Session
-from app.models.tables import Kline_1m, FundingRate, OpenInterest
+from app.models.tables import OneMinuteCandlestick, FundingRate, OpenInterest
 
 
 class DBRepository:
@@ -23,9 +23,9 @@ class DBRepository:
         - `limit`: 가져올 데이터 개수
         """
         klines = (
-            self.db.query(Kline_1m)
-            .filter(Kline_1m.symbol == symbol)
-            .order_by(Kline_1m.timestamp.desc())
+            self.db.query(OneMinuteCandlestick)
+            .filter(OneMinuteCandlestick.symbol == symbol)
+            .order_by(OneMinuteCandlestick.timestamp.desc())
             .limit(limit)
             .all()
         )
@@ -37,16 +37,16 @@ class DBRepository:
         df = df.set_index('timestamp').sort_index(ascending=False)
         return df
 
-    def get_klines_by_symbol(self, symbol: str, limit: int = 100) -> list[Kline_1m]:
+    def get_klines_by_symbol(self, symbol: str, limit: int = 100) -> list[OneMinuteCandlestick]:
         """
         특정 심볼의 kline 데이터를 최신순으로 가져옵니다.
         - `symbol`: 조회할 심볼 (예: "BTCUSDT")
         - `limit`: 가져올 데이터 개수
         """
         return (
-            self.db.query(Kline_1m)
-            .filter(Kline_1m.symbol == symbol)
-            .order_by(Kline_1m.timestamp.desc())
+            self.db.query(OneMinuteCandlestick)
+            .filter(OneMinuteCandlestick.symbol == symbol)
+            .order_by(OneMinuteCandlestick.timestamp.desc())
             .limit(limit)
             .all()
         )
