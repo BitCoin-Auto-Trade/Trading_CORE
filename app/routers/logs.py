@@ -99,5 +99,9 @@ async def websocket_endpoint(websocket: WebSocket):
 @router.get("/recent")
 async def get_recent_logs(limit: int = 100):
     """최근 로그 조회 API"""
-    recent_logs = list(log_buffer)[-limit:]
-    return {"logs": recent_logs}
+    try:
+        recent_logs = list(log_buffer)[-limit:]
+        return {"logs": recent_logs}
+    except Exception as e:
+        logger.error(f"최근 로그 조회 중 오류: {str(e)}")
+        return {"logs": [], "error": str(e)}

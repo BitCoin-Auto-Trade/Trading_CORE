@@ -3,7 +3,7 @@
 """
 from datetime import datetime
 from typing import Dict, Any
-from fastapi import APIRouter, HTTPException, Path
+from fastapi import APIRouter, HTTPException, Path, Depends
 from pydantic import BaseModel
 
 from app.repository.redis_repository import RedisRepository
@@ -88,8 +88,8 @@ def update_trading_settings(
 @router.patch("/trading/{key}")
 def update_single_setting(
     request: SettingUpdateRequest,
-    key: str = Path(..., description="업데이트할 설정 키"),
-    redis_client: RedisClient = None
+    redis_client: RedisClient,
+    key: str = Path(..., description="업데이트할 설정 키")
 ):
     """개별 거래 설정을 업데이트합니다."""
     try:

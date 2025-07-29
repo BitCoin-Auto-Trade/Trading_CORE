@@ -96,21 +96,53 @@ class SignalService:
         
         return True, ""
 
-    def _prepare_data(self, symbol: str, timeframe: str) -> pd.DataFrame:
+    def _prepare_data(self, symbol: str, timeframe: str = "1m") -> pd.DataFrame:
         """DB에서 지정된 타임프레임의 지표 데이터를 가져옵니다."""
-        # 참고: 이 예시에서는 DBRepository에 타임프레임별로 데이터를 가져오는 기능이 있다고 가정합니다.
-        # 실제 구현에서는 get_klines_by_symbol_as_df(symbol, timeframe, limit) 와 같이 수정 필요
-        df = self.db_repository.get_klines_by_symbol_as_df(symbol, limit=200) # 더 많은 데이터 로드
-        if df.empty:
-            raise DataNotFoundException(f"DB에 {symbol} ({timeframe}) 데이터가 없습니다")
-        
-        required = ['close', 'high', 'low', 'volume', 'atr', 'ema_20', 'sma_50', 'sma_200', 'rsi_14', 'macd_hist', 'stoch_k', 'stoch_d']
-        missing_cols = [col for col in required if col not in df.columns]
-        
-        if missing_cols:
-            raise DataNotFoundException(f"필수 지표가 DB에 없습니다: {missing_cols}")
+        try:
+            # 캐시 키 생성
+            cache_key = f"signal_data:{symbol}:{timeframe}"
             
-        return df.dropna()
+            # Redis에서 캐시된 데이터 확인
+            cached_data = self.redis_client.get(cache_key)
+            if cached_data:
+                try:
+                    # 캐시된 데이터를 DataFrame으로 복원
+                    import pickle
+                    df = pickle.loads(cached_data)
+                    if not df.empty and len(df) >= 50:
+                        logger.debug(f"캐시된 데이터 사용: {symbol} ({timeframe})")
+                        return df
+                except Exception as cache_error:
+                    logger.warning(f"캐시 데이터 복원 실패: {cache_error}")
+            
+            # DB에서 새로운 데이터 로드
+            df = self.db_repository.get_klines_by_symbol_as_df(symbol, limit=200)
+            if df.empty:
+                raise DataNotFoundException(f"DB에 {symbol} ({timeframe}) 데이터가 없습니다")
+            
+            required = ['close', 'high', 'low', 'volume', 'atr', 'ema_20', 'sma_50', 'sma_200', 'rsi_14', 'macd_hist', 'stoch_k', 'stoch_d']
+            missing_cols = [col for col in required if col not in df.columns]
+            
+            if missing_cols:
+                raise DataNotFoundException(f"필수 지표가 DB에 없습니다: {missing_cols}")
+            
+            df_clean = df.dropna()
+            
+            # 유효한 데이터만 캐시 저장 (5분간 유지)
+            if not df_clean.empty and len(df_clean) >= 50:
+                try:
+                    import pickle
+                    self.redis_client.setex(cache_key, 300, pickle.dumps(df_clean))
+                except Exception as cache_error:
+                    logger.warning(f"데이터 캐시 저장 실패: {cache_error}")
+            
+            return df_clean
+            
+        except DataNotFoundException:
+            raise
+        except Exception as e:
+            logger.error(f"데이터 준비 중 예기치 않은 오류: {symbol} - {e}")
+            raise DataNotFoundException(f"데이터 준비 실패: {str(e)}")
 
     def _analyze_long_term_trend(self, df_long: pd.DataFrame) -> Dict[str, Any]:
         """장기(15m) 추세 분석을 수행합니다."""

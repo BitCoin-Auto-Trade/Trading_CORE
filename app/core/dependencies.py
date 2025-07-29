@@ -2,7 +2,7 @@
 개선된 의존성 주입 시스템
 """
 from functools import lru_cache
-from typing import Annotated, Generator
+from typing import Annotated, Generator, List
 from fastapi import Depends
 from sqlalchemy.orm import Session
 import redis
@@ -35,6 +35,7 @@ def get_redis_repository(redis_client: RedisClient) -> RedisRepository:
 
 
 DbRepository = Annotated[DBRepository, Depends(get_db_repository)]
+DbRepositoryDep = DbRepository  # 별칭 추가
 RedisRepo = Annotated[RedisRepository, Depends(get_redis_repository)]
 
 
@@ -97,6 +98,46 @@ OrderServiceDep = Annotated[OrderService, Depends(get_order_service)]
 class DependencyManager:
     """의존성 관리자"""
     
+    @staticmethod
+    def get_all_position_symbols() -> List[str]:
+        """모든 포지션 심볼 목록을 반환하는 유틸리티 메서드"""
+        try:
+            with ServiceContext() as ctx:
+                redis_client = ctx.get_redis_client()
+                from app.core.constants import REDIS_KEYS
+                pattern = f"{REDIS_KEYS['POSITION_PREFIX']}*"
+                keys = redis_client.keys(pattern)
+                symbols = []
+                for key in keys:
+                    key_str = key.decode('utf-8') if isinstance(key, bytes) else str(key)
+                    # position:SYMBOL 형태에서 SYMBOL 추출
+                    parts = key_str.split(':')
+                    if len(parts) >= 2:
+                        symbols.append(parts[1])
+                return symbols
+        except Exception as e:
+            logger.error(f"포지션 심볼 목록 조회 중 오류: {e}")
+            return []
+    
+    @staticmethod
+    def validate_dependencies():
+        """의존성 유효성 검증"""
+        try:
+            # DB 연결 테스트
+            from app.core.db import SessionLocal
+            with SessionLocal() as db:
+                db.execute("SELECT 1")
+            
+            # Redis 연결 테스트  
+            from app.core.db import redis_client
+            redis_client.ping()
+            
+            logger.info("모든 의존성 검증 완료")
+            return True
+        except Exception as e:
+            logger.error(f"의존성 검증 실패: {e}")
+            return False
+
     @staticmethod
     def get_health_dependencies() -> dict:
         """헬스체크 의존성"""

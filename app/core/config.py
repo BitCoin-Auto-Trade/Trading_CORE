@@ -22,6 +22,10 @@ class DatabaseConfig(BaseSettings):
     POSTGRES_PORT: str = Field(default="5432", description="PostgreSQL 포트")
     POSTGRES_DB: str = Field(..., description="PostgreSQL 데이터베이스명")
     
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
+    
     @property
     def DATABASE_URL(self) -> str:
         """데이터베이스 연결 URL"""
@@ -38,6 +42,10 @@ class RedisConfig(BaseSettings):
     REDIS_PORT: int = Field(default=6379, description="Redis 포트")
     REDIS_DB: int = Field(default=0, description="Redis 데이터베이스 번호")
     REDIS_PASSWORD: str = Field(default="", description="Redis 비밀번호")
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
     
     @property
     def REDIS_URL(self) -> str:
@@ -65,6 +73,10 @@ class BinanceConfig(BaseSettings):
     # API 제한
     API_RATE_LIMIT: int = Field(default=1200, description="API 요청 제한 (요청/분)")
     API_TIMEOUT: int = Field(default=30, description="API 타임아웃 (초)")
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
 
 
 class TradingConfig(BaseSettings):
@@ -94,6 +106,10 @@ class TradingConfig(BaseSettings):
     MIN_SIGNAL_INTERVAL_MINUTES: int = Field(default=5, description="최소 신호 간격 (분)")
     MAX_CONSECUTIVE_LOSSES: int = Field(default=3, description="최대 연속 손실 횟수")
     ACTIVE_HOURS: list = Field(default=[(9, 24), (0, 2)], description="활성 거래 시간")
+    
+    class Config:
+        env_file = ".env"
+        extra = "ignore"
     
     @validator('LEVERAGE')
     def validate_leverage(cls, v):
@@ -156,6 +172,7 @@ class NewSettings(BaseSettings):
         env_file = ".env"
         env_file_encoding = "utf-8"
         case_sensitive = True
+        extra = "ignore"  # 추가 필드 허용
     
     @property
     def is_production(self) -> bool:

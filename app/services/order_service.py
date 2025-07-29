@@ -422,6 +422,24 @@ class OrderService:
         else:
             return new_stop_loss < pos.current_stop_loss
 
+    def get_position(self, symbol: str) -> Optional[PositionData]:
+        """특정 심볼의 포지션을 조회합니다."""
+        try:
+            position_key = self._get_position_key(symbol)
+            return self._load_position_from_redis(position_key)
+        except Exception as e:
+            logger.error(f"포지션 조회 중 오류 발생: {symbol} - {e}")
+            return None
+    
+    def get_all_position_symbols(self) -> List[str]:
+        """모든 포지션 심볼 목록을 반환합니다."""
+        try:
+            positions = self.get_all_positions()
+            return [pos.symbol for pos in positions]
+        except Exception as e:
+            logger.error(f"포지션 심볼 목록 조회 중 오류 발생: {e}")
+            return []
+
     async def close_position_by_symbol(self, symbol: str) -> Dict[str, Any]:
         """특정 심볼의 포지션을 수동으로 종료합니다."""
         position = self.get_position(symbol)
