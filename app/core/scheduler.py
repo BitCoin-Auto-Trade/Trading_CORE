@@ -31,7 +31,7 @@ async def process_signals_for_entry(signal_service: SignalService, order_service
 
     for symbol in symbols:
         try:
-            signal_data = signal_service.get_combined_trading_signal(symbol)
+            signal_data = signal_service.generate_comprehensive_trading_signal(symbol)
             
             # Redis에 신호 저장
             redis_key = f"trading_signal:{symbol}"

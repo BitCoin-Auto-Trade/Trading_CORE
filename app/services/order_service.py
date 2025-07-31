@@ -148,7 +148,7 @@ class TradingOrderManager:
         """포지션 키를 생성합니다."""
         return get_redis_key("POSITION", symbol)
 
-    def get_all_active_positions(self) -> List[PositionInfo]:
+    def get_all_positions(self) -> List[PositionInfo]:
         """활성 포지션 목록 조회
         
         Returns:
@@ -158,11 +158,11 @@ class TradingOrderManager:
             positions = []
             # Redis에서 모든 포지션 키를 찾습니다
             position_pattern = f"{REDIS_KEYS['POSITION_PREFIX']}*"
-            position_keys = self.redis.keys(position_pattern)
+            position_keys = self.cache_client.keys(position_pattern)
             
             for key in position_keys:
                 try:
-                    position_data = self.redis.hgetall(key)
+                    position_data = self.cache_client.hgetall(key)
                     if position_data:
                         position = PositionInfo.from_redis_data(position_data)
                         positions.append(position)
@@ -182,7 +182,7 @@ class TradingOrderManager:
         position_key = self._get_position_key(symbol)
         
         # 이미 포지션이 존재하는지 확인
-        if self.redis.exists(position_key):
+        if self.cache_client.exists(position_key):
             logger.warning(f"이미 활성 포지션이 존재합니다", symbol=symbol)
             return create_api_response(
                 success=False,
@@ -193,7 +193,7 @@ class TradingOrderManager:
             position = self._create_position_from_signal(signal)
             
             # Redis에 포지션 저장
-            self.redis.hset(position_key, mapping=position.to_redis_dict())
+            self.cache_client.hset(position_key, mapping=position.to_redis_dict())
             
             logger.log_position(
                 symbol=symbol,
@@ -267,11 +267,11 @@ class TradingOrderManager:
             except Exception as e:
                 logger.error(f"모니터링 루프 오류: {e}")
                 
-            await asyncio.sleep(self.monitoring_interval)
+            await asyncio.sleep(self.position_monitoring_interval)
 
     def _get_all_position_keys(self) -> List[str]:
         """모든 포지션 키를 가져옵니다."""
-        return [key for key in self.redis.keys(f"{REDIS_KEYS['POSITION']}*")]
+        return [key for key in self.cache_client.keys(f"{REDIS_KEYS['POSITION']}*")]
 
     @timeout(timeout_seconds=30)
     async def _monitor_single_position(self, position_key_raw):
@@ -286,12 +286,12 @@ class TradingOrderManager:
                 return
             
             # Binance API 사용 가능 여부 확인
-            if not self.binance_adapter.is_api_available():
+            if not self.exchange_adapter.is_api_available():
                 logger.debug(f"Binance API 비활성화, 포지션 모니터링 건너뜀: {position.symbol}")
                 return
             
             # 현재 가격 조회
-            current_price = await self.binance_adapter.get_current_price(position.symbol)
+            current_price = await self.exchange_adapter.get_current_price(position.symbol)
             if not current_price:
                 logger.warning(f"현재 가격 조회 실패", symbol=position.symbol)
                 return
@@ -313,7 +313,7 @@ class TradingOrderManager:
     def _load_position_from_redis(self, position_key: str) -> Optional[PositionInfo]:
         """Redis에서 포지션 데이터를 로드합니다."""
         try:
-            raw_data = self.redis.hgetall(position_key)
+            raw_data = self.cache_client.hgetall(position_key)
             if not raw_data:
                 logger.debug(f"Redis에서 포지션 데이터 없음: {position_key}")
                 return None
@@ -348,14 +348,14 @@ class TradingOrderManager:
             return TRADING["CLOSE_REASONS"]["STOP_LOSS_HIT"]
         
         # 2. 시간 기반 청산
-        if datetime.utcnow() - pos.entry_timestamp > self.max_position_hold_time:
+        if datetime.utcnow() - pos.entry_timestamp > self.max_position_duration:
             return TRADING["CLOSE_REASONS"]["TIME_LIMIT_EXCEEDED"]
         
         # 3. 변동성 기반 청산 - ATR을 활용한 변동성 임계값 체크
         try:
             # Redis에서 현재 ATR 값을 가져와서 변동성 기반 청산 조건 체크
             atr_key = f"{REDIS_KEYS['PRICE_PREFIX']}{pos.symbol}:atr"
-            current_atr = self.redis.get(atr_key)
+            current_atr = self.cache_client.get(atr_key)
             if current_atr:
                 current_atr = float(current_atr)
                 price_change_ratio = abs(price - pos.entry_price) / pos.entry_price
@@ -371,7 +371,7 @@ class TradingOrderManager:
         """포지션을 종료합니다."""
         try:
             # 실제 거래소에서 포지션 종료 주문 실행
-            order_result = await self.binance_adapter.close_position(
+            order_result = await self.exchange_adapter.close_position(
                 symbol=pos.symbol
             )
             
@@ -379,10 +379,10 @@ class TradingOrderManager:
             result = TRADING["RESULTS"]["PROFIT"] if profit >= 0 else TRADING["RESULTS"]["LOSS"]
             
             # 성능 업데이트
-            self.signal_service.update_performance(result)
+            self.signal_analyzer.update_trading_performance(result)
             
             # Redis에서 포지션 삭제
-            self.redis.delete(self._get_position_key(pos.symbol))
+            self.cache_client.delete(self._get_position_key(pos.symbol))
             
             logger.log_position(
                 symbol=pos.symbol,
@@ -400,7 +400,7 @@ class TradingOrderManager:
         except Exception as e:
             logger.error(f"포지션 종료 실패: {pos.symbol} - {str(e)}", exc_info=True)
             # 포지션은 Redis에서 제거하되 오류 기록
-            self.redis.delete(self._get_position_key(pos.symbol))
+            self.cache_client.delete(self._get_position_key(pos.symbol))
             raise OrderServiceException(f"포지션 종료 실패: {str(e)}")
 
     async def _update_trailing_stop(self, pos: PositionInfo, price: float):
@@ -411,7 +411,7 @@ class TradingOrderManager:
         # 트레일링 스탑 활성화 조건 확인
         if not pos.trailing_stop_activated:
             if self._should_activate_trailing_stop(pos, price):
-                self.redis.hset(key, "trailing_stop_activated", "True")
+                self.cache_client.hset(key, "trailing_stop_activated", "True")
                 logger.info(f"트레일링 스탑 활성화", symbol=pos.symbol)
                 updated = True
 
@@ -419,15 +419,15 @@ class TradingOrderManager:
         if pos.trailing_stop_activated or updated:
             new_stop_loss = self._calculate_new_stop_loss(pos, price)
             if self._should_update_stop_loss(pos, new_stop_loss):
-                self.redis.hset(key, "current_stop_loss", str(new_stop_loss))
+                self.cache_client.hset(key, "current_stop_loss", str(new_stop_loss))
                 
                 # 최고가/최저가 업데이트
                 if pos.side == TRADING["SIDES"]["LONG"]:
                     highest = max(pos.highest_price_so_far, price)
-                    self.redis.hset(key, "highest_price_so_far", str(highest))
+                    self.cache_client.hset(key, "highest_price_so_far", str(highest))
                 else:
                     lowest = min(pos.lowest_price_so_far, price)
-                    self.redis.hset(key, "lowest_price_so_far", str(lowest))
+                    self.cache_client.hset(key, "lowest_price_so_far", str(lowest))
                 
                 logger.info(
                     f"손절선 업데이트: {new_stop_loss:.4f}",
@@ -488,7 +488,7 @@ class TradingOrderManager:
             raise PositionException(f"포지션이 존재하지 않습니다: {symbol}")
         
         # 현재 가격 조회
-        current_price = await self.binance_adapter.get_latest_price(symbol)
+        current_price = await self.exchange_adapter.get_latest_price(symbol)
         
         # 포지션 종료
         await self._close_position(position, current_price, TRADING["CLOSE_REASONS"]["MANUAL_CLOSE"])
@@ -553,7 +553,7 @@ class TradingOrderManager:
             try:
                 # 임시로 Redis에서 마지막 가격 조회
                 price_key = f"{REDIS_KEYS['PRICE_PREFIX']}{position.symbol}"
-                current_price = self.redis.get(price_key)
+                current_price = self.cache_client.get(price_key)
                 current_price = float(current_price) if current_price else position.entry_price
             except:
                 current_price = position.entry_price
@@ -597,7 +597,7 @@ class TradingOrderManager:
     def toggle_auto_trading(self) -> Dict[str, Any]:
         """자동 거래 활성화/비활성화를 토글합니다."""
         self.settings.AUTO_TRADING_ENABLED = not self.settings.AUTO_TRADING_ENABLED
-        self.redis.hset(REDIS_KEYS["TRADING_SETTINGS"], "AUTO_TRADING_ENABLED", str(self.settings.AUTO_TRADING_ENABLED))
+        self.cache_client.hset(REDIS_KEYS["TRADING_SETTINGS"], "AUTO_TRADING_ENABLED", str(self.settings.AUTO_TRADING_ENABLED))
         
         status = "활성화" if self.settings.AUTO_TRADING_ENABLED else "비활성화"
         logger.info(f"자동 거래 {status}")

@@ -159,6 +159,35 @@ class TradingSignalAnalyzer:
             if df.empty:
                 raise DataNotFoundException(f"데이터베이스에 {symbol} ({timeframe}) 데이터가 존재하지 않음")
             
+            # 컬럼명 매핑 (DB 컬럼명 -> 신호 분석용 컬럼명)
+            column_mapping = {
+                'open_price': 'open',
+                'high_price': 'high', 
+                'low_price': 'low',
+                'close_price': 'close',
+                'exponential_moving_average_20': 'ema_20',
+                'simple_moving_average_50': 'sma_50',
+                'simple_moving_average_200': 'sma_200',
+                'relative_strength_index_14': 'rsi_14',
+                'macd_line': 'macd',
+                'macd_signal_line': 'macd_signal',
+                'macd_histogram': 'macd_hist',
+                'average_true_range': 'atr',
+                'average_directional_index': 'adx',
+                'bollinger_band_upper': 'bb_upper',
+                'bollinger_band_middle': 'bb_middle',
+                'bollinger_band_lower': 'bb_lower',
+                'stochastic_k': 'stoch_k',
+                'stochastic_d': 'stoch_d',
+                'volume_simple_moving_average_20': 'volume_sma_20'
+            }
+            
+            # 컬럼명 변경
+            df = df.rename(columns=column_mapping)
+            
+            # 디버그: 매핑 후 컬럼명 확인
+            logger.debug(f"매핑 후 컬럼명: {df.columns.tolist()}")
+            
             # 필수 기술적 지표 컬럼 검증
             required_indicators = [
                 'close', 'high', 'low', 'volume', 'atr', 'ema_20', 
@@ -167,6 +196,8 @@ class TradingSignalAnalyzer:
             missing_indicators = [col for col in required_indicators if col not in df.columns]
             
             if missing_indicators:
+                logger.error(f"매핑 후에도 누락된 지표: {missing_indicators}")
+                logger.error(f"실제 사용 가능한 컬럼: {df.columns.tolist()}")
                 raise DataNotFoundException(f"필수 기술적 지표 누락: {missing_indicators}")
             
             # NaN 값 제거 후 유효성 검증
